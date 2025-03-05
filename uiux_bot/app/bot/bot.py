@@ -5,9 +5,10 @@ Main bot class for the UI/UX Lesson Bot.
 import logging
 import signal
 import sys
+import asyncio
 
 from telegram.ext import (
-    Updater,
+    Application,
     CommandHandler,
     CallbackContext,
 )
@@ -30,9 +31,8 @@ class UIUXLessonBot:
         settings.validate_settings()
         
         # Initialize bot components
-        self.updater = Updater(settings.TELEGRAM_BOT_TOKEN)
-        self.dispatcher = self.updater.dispatcher
-        self.bot = self.updater.bot
+        self.application = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).build()
+        self.bot = self.application.bot
         
         # Initialize scheduler
         self.scheduler = scheduler.LessonScheduler(self.bot)
@@ -62,26 +62,26 @@ class UIUXLessonBot:
         # Stop the scheduler
         if hasattr(self, 'scheduler'):
             self.scheduler.shutdown()
-        # Stop the updater
-        if hasattr(self, 'updater'):
-            self.updater.stop()
+        # Stop the application
+        if hasattr(self, 'application'):
+            asyncio.run(self.application.stop())
         sys.exit(0)
 
     def setup_handlers(self):
         """Setup command handlers for the bot"""
         # Command handlers
-        self.dispatcher.add_handler(CommandHandler("start", handlers.start_command))
-        self.dispatcher.add_handler(CommandHandler("stop", handlers.stop_command))
-        self.dispatcher.add_handler(CommandHandler("nextlesson", handlers.next_lesson_command))
-        self.dispatcher.add_handler(CommandHandler("help", handlers.help_command))
-        self.dispatcher.add_handler(CommandHandler("health", handlers.health_command))
+        self.application.add_handler(CommandHandler("start", handlers.start_command))
+        self.application.add_handler(CommandHandler("stop", handlers.stop_command))
+        self.application.add_handler(CommandHandler("nextlesson", handlers.next_lesson_command))
+        self.application.add_handler(CommandHandler("help", handlers.help_command))
+        self.application.add_handler(CommandHandler("health", handlers.health_command))
         
         # Admin commands
-        self.dispatcher.add_handler(CommandHandler("stats", handlers.stats_command))
-        self.dispatcher.add_handler(CommandHandler("broadcast", handlers.broadcast_command))
+        self.application.add_handler(CommandHandler("stats", handlers.stats_command))
+        self.application.add_handler(CommandHandler("broadcast", handlers.broadcast_command))
         
         # Error handler
-        self.dispatcher.add_error_handler(handlers.error_handler)
+        self.application.add_error_handler(handlers.error_handler)
 
     def start(self):
         """Start the bot and scheduler"""
@@ -100,11 +100,9 @@ class UIUXLessonBot:
             self.scheduler.schedule_jobs()
             
             # Start the bot
-            self.updater.start_polling()
+            self.application.run_polling()
             logger.info("Bot started and polling for updates")
             
-            # Run the bot until Ctrl-C is pressed
-            self.updater.idle()
         except Exception as e:
             logger.critical(f"Failed to start bot: {e}")
             raise

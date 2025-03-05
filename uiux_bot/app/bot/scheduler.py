@@ -24,23 +24,37 @@ class LessonScheduler:
     
     def schedule_jobs(self):
         """Schedule regular lesson jobs"""
-        # Morning lesson at 10:00 IST
-        self.scheduler.add_job(
-            self.send_scheduled_lesson,
-            CronTrigger(hour=10, minute=0, timezone=settings.TIMEZONE),
-            id="morning_lesson",
-            replace_existing=True,
-            misfire_grace_time=600,  # 10 minutes grace time for misfires
-        )
-        
-        # Evening lesson at 18:00 IST
-        self.scheduler.add_job(
-            self.send_scheduled_lesson,
-            CronTrigger(hour=18, minute=0, timezone=settings.TIMEZONE),
-            id="evening_lesson",
-            replace_existing=True,
-            misfire_grace_time=600,  # 10 minutes grace time for misfires
-        )
+        if settings.IS_DEV_MODE:
+            # Development mode: Send lesson every 30 seconds for quick testing
+            self.scheduler.add_job(
+                self.send_scheduled_lesson,
+                'interval',
+                seconds=30,
+                id="dev_mode_lesson",
+                replace_existing=True,
+                misfire_grace_time=10,  # 10 seconds grace time for misfires
+            )
+            logger.info("Development mode: Scheduled lessons every 30 seconds")
+        else:
+            # Production mode: Regular schedule at fixed times
+            # Morning lesson at 10:00 IST
+            self.scheduler.add_job(
+                self.send_scheduled_lesson,
+                CronTrigger(hour=10, minute=0, timezone=settings.TIMEZONE),
+                id="morning_lesson",
+                replace_existing=True,
+                misfire_grace_time=600,  # 10 minutes grace time for misfires
+            )
+            
+            # Evening lesson at 18:00 IST
+            self.scheduler.add_job(
+                self.send_scheduled_lesson,
+                CronTrigger(hour=18, minute=0, timezone=settings.TIMEZONE),
+                id="evening_lesson",
+                replace_existing=True,
+                misfire_grace_time=600,  # 10 minutes grace time for misfires
+            )
+            logger.info("Production mode: Scheduled lessons at 10:00 and 18:00 IST")
         
         # Add job to periodically save subscribers
         self.scheduler.add_job(
@@ -57,8 +71,6 @@ class LessonScheduler:
             id="update_health",
             replace_existing=True,
         )
-        
-        logger.info("Scheduled jobs: lessons at 10:00 and 18:00 IST, plus maintenance tasks")
     
     async def send_scheduled_lesson(self):
         """Send scheduled lesson to all subscribers or channel"""

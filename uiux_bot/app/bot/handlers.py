@@ -8,7 +8,8 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-from telegram import Update, ParseMode, Poll
+from telegram import Update, Poll
+from telegram.constants import ParseMode
 from telegram.ext import CallbackContext
 
 from app.config import settings
@@ -111,11 +112,26 @@ async def next_lesson_command(update: Update, context: CallbackContext):
     if user_id not in settings.ADMIN_USER_IDS:
         last_request = context.user_data.get('last_nextlesson_request', 0)
         now = time.time()
-        if now - last_request < 3600:  # 1 hour cooldown
-            minutes_left = int((3600 - (now - last_request)) / 60)
+        cooldown = settings.NEXTLESSON_COOLDOWN
+        if now - last_request < cooldown:
+            time_left = int(cooldown - (now - last_request))
+            
+            # Format the time differently based on the cooldown duration
+            if cooldown >= 3600:  # 1 hour or more
+                minutes_left = time_left // 60
+                time_msg = f"{minutes_left} more minutes"
+            else:
+                time_msg = f"{time_left} more seconds"
+            
+            # Different message based on deployment mode
+            if settings.IS_DEV_MODE:
+                mode_msg = f"[DEV MODE] Cooldown set to {cooldown} seconds for testing purposes."
+            else:
+                mode_msg = f"This limit helps prevent abuse and keeps costs down. Thank you for understanding!"
+                
             await update.message.reply_text(
-                f"⏳ Please wait {minutes_left} more minutes before requesting another lesson.\n"
-                f"This limit helps prevent abuse and keeps costs down. Thank you for understanding!"
+                f"⏳ Please wait {time_msg} before requesting another lesson.\n"
+                f"{mode_msg}"
             )
             return
         # Set last request time

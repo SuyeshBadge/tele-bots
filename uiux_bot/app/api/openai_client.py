@@ -7,19 +7,24 @@ import logging
 import asyncio
 from typing import Dict, Any, Optional
 
-import openai
+from openai import AsyncOpenAI
 
 from app.config import settings
 
 # Configure logger
 logger = logging.getLogger(__name__)
 
-# Set OpenAI API key
-openai.api_key = settings.OPENAI_API_KEY
+# Initialize OpenAI client
+client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
 
 async def generate_lesson_content(theme: str) -> Dict[str, Any]:
     """Generate lesson content using OpenAI API"""
+    # If OpenAI is disabled, return fallback lesson immediately
+    if settings.DISABLE_OPENAI:
+        logger.info("OpenAI API disabled, using fallback lesson")
+        return get_fallback_lesson(theme)
+        
     retry_count = 0
     max_retries = 3
     
@@ -33,8 +38,8 @@ async def generate_lesson_content(theme: str) -> Dict[str, Any]:
                 f"correct_option_index (0-based), and explanation."
             )
             
-            response = await openai.ChatCompletion.acreate(
-                model=settings.OPENAI_MODEL,
+            response = await client.chat.completions.create(
+                model="gpt-3.5-turbo",  # Explicitly using gpt-3.5-turbo instead of settings.OPENAI_MODEL
                 messages=[
                     {"role": "system", "content": "You are a UI/UX design instructor creating educational content."},
                     {"role": "user", "content": prompt}

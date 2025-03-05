@@ -5,6 +5,8 @@ Unsplash API client for fetching UI/UX related images.
 import os
 import random
 import logging
+import ssl
+import certifi
 from typing import Dict, Optional, Any
 
 import aiohttp
@@ -30,7 +32,14 @@ async def get_image_for_lesson(theme: str) -> Optional[Dict[str, Any]]:
             }
             headers = {"Authorization": f"Client-ID {settings.UNSPLASH_API_KEY}"}
             
-            async with aiohttp.ClientSession() as session:
+            # Create SSL context with proper certificate verification
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+            
+            # Set verify_ssl based on environment (can be made configurable in settings)
+            verify_ssl = not getattr(settings, 'DISABLE_SSL_VERIFICATION', False)
+            
+            connector = aiohttp.TCPConnector(ssl=ssl_context if verify_ssl else False)
+            async with aiohttp.ClientSession(connector=connector) as session:
                 async with session.get(url, headers=headers, params=params, timeout=settings.REQUEST_TIMEOUT) as response:
                     if response.status == 200:
                         data = await response.json()

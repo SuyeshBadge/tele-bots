@@ -14,6 +14,11 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Deployment configuration
+DEPLOYMENT_MODE = os.getenv("DEPLOYMENT_MODE", "prod").lower()
+IS_DEV_MODE = DEPLOYMENT_MODE == "dev"
+IS_PROD_MODE = DEPLOYMENT_MODE == "prod"
+
 # Bot configuration
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")  # Optional: For channel posting mode
@@ -22,12 +27,27 @@ ADMIN_USER_IDS = [int(id) for id in os.getenv("ADMIN_USER_IDS", "").split(",") i
 # OpenAI configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4")  # Allow configurable model
+DISABLE_OPENAI = os.getenv("DISABLE_OPENAI", "False").lower() in ("true", "1", "yes")
 
 # Unsplash configuration
 UNSPLASH_API_KEY = os.getenv("UNSPLASH_API_KEY", "")  # For Unsplash images
 
 # API request settings
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))  # Timeout for external API requests
+
+# SSL verification settings
+DISABLE_SSL_VERIFICATION = os.getenv("DISABLE_SSL_VERIFICATION", "False").lower() in ("true", "1", "yes")
+if IS_DEV_MODE and os.getenv("DISABLE_SSL_VERIFICATION") is None:
+    # Default to disabled SSL verification in dev mode unless explicitly set
+    DISABLE_SSL_VERIFICATION = True
+
+# Feature configuration - Set defaults based on deployment mode
+# Only override from env if explicitly set
+if os.getenv("NEXTLESSON_COOLDOWN"):
+    NEXTLESSON_COOLDOWN = int(os.getenv("NEXTLESSON_COOLDOWN"))
+else:
+    # 30 seconds for dev mode, 1 hour for prod mode
+    NEXTLESSON_COOLDOWN = 30 if IS_DEV_MODE else 3600
 
 # Timezone settings
 TZ = os.getenv("TZ", "Asia/Kolkata")
