@@ -65,8 +65,8 @@ kill_timeout = 30 # Increased timeout for graceful shutdown
   source = "uiux_bot_data"
   destination = "/app/data"
   auto_extend_size_threshold = 80
-  auto_extend_size_increment = "100MB"
-  auto_extend_size_limit = "1GB"
+  auto_extend_size_increment = "1GB"
+  auto_extend_size_limit = "10GB"
 
 # Ensure proper file logging storage
 [[files]]

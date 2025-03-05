@@ -45,8 +45,13 @@ fly secrets set ALLOWED_CHANNELS=channel_id1,channel_id2
 Create a persistent volume to store the bot's data:
 
 ```bash
+# Create a volume with initial size 1GB
 fly volumes create uiux_bot_data --size 1 --region iad
 ```
+
+Note: When configuring auto-extending volumes in fly.toml, ensure that:
+- `auto_extend_size_increment` is set to at least 1GB (required by Fly.io)
+- `auto_extend_size_limit` defines a reasonable upper limit for your storage needs
 
 ### 4. Deploy the Application
 
