@@ -57,7 +57,7 @@ class UIUXLessonBot:
         # Initialize health check
         persistence.update_health_status()
         
-        # Track if the bot is shutting down
+        # Shutdown flag to prevent multiple shutdown attempts
         self.is_shutting_down = False
 
     def setup_signal_handlers(self):
@@ -139,6 +139,9 @@ class UIUXLessonBot:
                     loop.run_until_complete(asyncio.wait_for(future, timeout=5.0))
                 except (asyncio.TimeoutError, asyncio.CancelledError):
                     logger.warning("Application stop timed out or was cancelled")
+                except RuntimeError as e:
+                    # Handle case where event loop is already closed
+                    logger.warning(f"Runtime error during shutdown: {e}")
         except Exception as e:
             logger.error(f"Error during shutdown: {e}")
         finally:

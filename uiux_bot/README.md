@@ -54,11 +54,21 @@ All configuration is done through environment variables. See `.env.example` for 
 
 - `TELEGRAM_BOT_TOKEN`: Your Telegram bot token (required)
 - `OPENAI_API_KEY`: Your OpenAI API key (required)
-- `UNSPLASH_API_KEY`: Your Unsplash API key (required)
+- `UNSPLASH_API_KEY`: Your Unsplash API key (optional but recommended)
+- `PEXELS_API_KEY`: Your Pexels API key (optional)
 - `CHANNEL_ID`: Optional channel ID for broadcasting lessons
 - `ADMIN_USER_IDS`: Comma-separated list of admin user IDs
 - `LOG_LEVEL`: Logging level (default: INFO)
 - `REQUEST_TIMEOUT`: API request timeout in seconds (default: 30)
+
+### Image Generation Settings
+
+The bot supports multiple image sources with configurable preferences:
+
+- `ENABLE_DALLE_IMAGES`: Set to True to enable DALL-E image generation
+- `DALLE_MODEL`: Choose between 'dall-e-2' or 'dall-e-3'
+- `IMAGE_PREFERENCE`: Comma-separated order of image sources to try (e.g., "dalle,unsplash,pexels,local")
+- `SAVE_IMAGES_LOCALLY`: Save online images locally for future use (recommended for production)
 
 ## Project Structure
 
@@ -88,10 +98,15 @@ uiux_bot/
 
 - **Scheduled Lessons**: Automatically sends UI/UX lessons at 10:00 and 18:00 IST
 - **Interactive Quizzes**: Tests user knowledge with interactive quizzes
-- **Custom Images**: Generates relevant images for each lesson using Unsplash API
+- **Multi-Source Image Generation**: Combines multiple image sources for the most relevant visuals:
+  - OpenAI DALL-E: Generates custom UI/UX themed images
+  - Unsplash API: Fetches relevant stock photos
+  - Pexels API: Provides additional professional imagery
+  - Local Fallback: Uses pre-saved images when online sources are unavailable
+- **Image Command**: Users can request UI/UX themed images on demand with `/image <theme>`
 - **Admin Commands**: Special commands for bot administrators
 - **Health Monitoring**: Built-in health checks and status reporting
-- **Persistent Storage**: All subscriber data is stored persistently
+- **Persistent Storage**: All subscriber data and images stored persistently
 
 ## Development Mode
 

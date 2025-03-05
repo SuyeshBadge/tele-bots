@@ -14,6 +14,9 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Configure logger
+logger = logging.getLogger(__name__)
+
 # Deployment configuration
 DEPLOYMENT_MODE = os.getenv("DEPLOYMENT_MODE", "prod").lower()
 IS_DEV_MODE = DEPLOYMENT_MODE == "dev"
@@ -39,6 +42,9 @@ ENABLE_DALLE_IMAGES = os.getenv("ENABLE_DALLE_IMAGES", "False").lower() in ("tru
 DALLE_MODEL = os.getenv("DALLE_MODEL", "dall-e-2")  # 'dall-e-2' or 'dall-e-3'
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")  # For Pexels stock photos
 IMAGE_PREFERENCE = os.getenv("IMAGE_PREFERENCE", "dalle,unsplash,pexels,local").lower()  # Comma-separated list of preferred sources
+
+# User limits
+MAX_DAILY_LESSONS = os.getenv("MAX_DAILY_LESSONS", "5")  # Maximum on-demand lessons per day
 
 # Unsplash configuration
 UNSPLASH_API_KEY = os.getenv("UNSPLASH_API_KEY", "")  # For Unsplash images
@@ -243,11 +249,44 @@ UI_UX_THEMES = [
 # Validate required settings
 def validate_settings():
     """Validate that required settings are configured"""
+    # Declare globals upfront that might be modified in this function
+    global DISABLE_OPENAI
+    global ENABLE_DALLE_IMAGES
+    global DALLE_MODEL
+    global MAX_DAILY_LESSONS
+    
+    # Check required settings
     if not TELEGRAM_BOT_TOKEN:
         raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY environment variable is required")
     
-    # Create necessary directories
+    # For OPENAI, only require API key if not using fallback
+    if not OPENAI_API_KEY and not DISABLE_OPENAI:
+        logger.warning("OPENAI_API_KEY not set but OpenAI is enabled. Disabling OpenAI features.")
+        DISABLE_OPENAI = True
+    
+    # Validate DALLE_MODEL if DALL-E is enabled
+    if ENABLE_DALLE_IMAGES:
+        if not OPENAI_API_KEY:
+            logger.warning("ENABLE_DALLE_IMAGES is set but OPENAI_API_KEY is missing. Disabling DALL-E image generation.")
+            ENABLE_DALLE_IMAGES = False
+        elif DALLE_MODEL not in ["dall-e-2", "dall-e-3"]:
+            logger.warning(f"Invalid DALLE_MODEL '{DALLE_MODEL}'. Must be 'dall-e-2' or 'dall-e-3'. Defaulting to 'dall-e-2'.")
+            DALLE_MODEL = "dall-e-2"
+    
+    # If no image sources are available, warn but continue (will use local fallbacks)
+    if not UNSPLASH_API_KEY and not (ENABLE_DALLE_IMAGES and OPENAI_API_KEY) and not PEXELS_API_KEY:
+        logger.warning("No external image APIs configured. Only local fallback images will be used.")
+        
+    # Ensure directories exist
     os.makedirs(DATA_DIR, exist_ok=True)
-    os.makedirs(FALLBACK_IMAGES_DIR, exist_ok=True) 
+    os.makedirs(FALLBACK_IMAGES_DIR, exist_ok=True)
+    
+    # Ensure MAX_DAILY_LESSONS is a reasonable value
+    try:
+        MAX_DAILY_LESSONS = int(MAX_DAILY_LESSONS)
+        if MAX_DAILY_LESSONS <= 0:
+            logger.warning("MAX_DAILY_LESSONS must be positive. Setting to default value of 5.")
+            MAX_DAILY_LESSONS = 5
+    except (ValueError, TypeError):
+        logger.warning("Invalid MAX_DAILY_LESSONS value. Setting to default value of 5.")
+        MAX_DAILY_LESSONS = 5 # A comment to trigger hot reload

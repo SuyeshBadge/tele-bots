@@ -132,34 +132,75 @@ class ImageManager:
     """Manager class that organizes multiple image sources with fallback logic"""
     
     def __init__(self):
-        self.strategies: List[ImageStrategy] = []
+        self.strategies = {}
+        self.strategy_order = []
         
-        # Configure the strategies based on available API keys and settings
-        # Add DALL-E if OpenAI API key is available and DALL-E is enabled
-        dalle_enabled = getattr(settings, "ENABLE_DALLE_IMAGES", False)
-        if settings.OPENAI_API_KEY and dalle_enabled:
-            self.strategies.append(OpenAIDALLEStrategy())
+        # Initialize all available strategies
+        if settings.OPENAI_API_KEY and getattr(settings, "ENABLE_DALLE_IMAGES", False):
+            self.strategies["dalle"] = OpenAIDALLEStrategy()
         
-        # Add Unsplash if API key is available
         if settings.UNSPLASH_API_KEY:
-            self.strategies.append(UnsplashStrategy())
+            self.strategies["unsplash"] = UnsplashStrategy()
             
-        # Add Pexels if API key is available
         if hasattr(settings, "PEXELS_API_KEY") and settings.PEXELS_API_KEY:
-            self.strategies.append(PexelsStrategy())
+            self.strategies["pexels"] = PexelsStrategy()
             
-        # Always add local fallback as last resort
-        self.strategies.append(LocalFallbackStrategy())
+        # Always add local fallback
+        self.strategies["local"] = LocalFallbackStrategy()
+        
+        # Set up the strategy order based on settings.IMAGE_PREFERENCE
+        self._configure_strategy_order()
+        
+        # Log available strategies
+        logger.info(f"Available image strategies: {list(self.strategies.keys())}")
+        logger.info(f"Image strategy order: {self.strategy_order}")
+        
+    def _configure_strategy_order(self):
+        """Configure the order in which strategies are tried"""
+        try:
+            # Default order if not specified in settings
+            default_order = ["dalle", "unsplash", "pexels", "local"]
+            
+            # Get the preference order from settings
+            if hasattr(settings, "IMAGE_PREFERENCE") and settings.IMAGE_PREFERENCE:
+                preference_order = settings.IMAGE_PREFERENCE.lower().split(',')
+                # Filter out any preferences that aren't available
+                self.strategy_order = [p.strip() for p in preference_order if p.strip() in self.strategies]
+                
+                # If any strategies are missing from the preference list, add them to the end
+                for strategy_name in self.strategies:
+                    if strategy_name not in self.strategy_order:
+                        self.strategy_order.append(strategy_name)
+            else:
+                # Use default order, filtered by available strategies
+                self.strategy_order = [s for s in default_order if s in self.strategies]
+        except Exception as e:
+            logger.error(f"Error configuring strategy order: {e}. Using fallback order.")
+            # Fallback to a simple order based on what's available
+            self.strategy_order = list(self.strategies.keys())
+            # Ensure local is last if it exists
+            if "local" in self.strategy_order:
+                self.strategy_order.remove("local")
+                self.strategy_order.append("local")
     
     async def get_image_for_lesson(self, theme: str) -> Optional[Dict[str, Any]]:
         """Get an image for a lesson using multiple strategies with fallback"""
         logger.info(f"Getting image for theme: {theme}")
         
-        # Try each strategy in order until one succeeds
-        for strategy in self.strategies:
-            image_data = await strategy.get_image(theme)
-            if image_data:
-                return image_data
+        # Try strategies in the configured order
+        for strategy_name in self.strategy_order:
+            if strategy_name in self.strategies:
+                try:
+                    logger.info(f"Trying {strategy_name} strategy for theme: {theme}")
+                    image_data = await self.strategies[strategy_name].get_image(theme)
+                    if image_data:
+                        logger.info(f"Successfully got image from {strategy_name} for theme: {theme}")
+                        # Add metadata about the source
+                        image_data["source"] = strategy_name
+                        return image_data
+                except Exception as e:
+                    logger.error(f"Error using {strategy_name} strategy: {e}")
+                    continue
         
         logger.warning(f"Failed to get image for theme: {theme} from any source")
         return None

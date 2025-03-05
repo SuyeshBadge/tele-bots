@@ -9,10 +9,13 @@ import json
 import re
 from datetime import datetime
 from typing import Dict, Any, Optional
+import asyncio
+import os
 
-from telegram import Update, Poll
+from telegram import Update, Poll, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
 from telegram.constants import ParseMode
 from telegram.ext import CallbackContext
+from telegram.error import BadRequest
 
 from app.config import settings
 from app.api import openai_client
@@ -146,6 +149,9 @@ async def help_command(update: Update, context: CallbackContext):
     )
     
     await update.message.reply_text(help_text, parse_mode=ParseMode.HTML)
+    
+    # Update health status to indicate the bot is responding to commands
+    persistence.update_health_status()
 
 
 async def health_command(update: Update, context: CallbackContext):
@@ -406,7 +412,18 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
                         lesson_data[field] = 0
 
         # Get an image using the enhanced image manager
-        image_data = await image_manager.get_image_for_lesson(theme)
+        try:
+            # Set a reasonable timeout for image generation
+            image_task = asyncio.create_task(image_manager.get_image_for_lesson(theme))
+            image_data = await asyncio.wait_for(image_task, timeout=30.0)
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout while generating image for theme: {theme}")
+            # Continue without an image
+            image_data = None
+        except Exception as e:
+            logger.error(f"Error getting image in send_lesson: {e}")
+            # Continue without an image
+            image_data = None
         
         # Save this lesson's content to user history 
         message_summary = {
@@ -438,6 +455,9 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
         # Make sure we have proper newlines in the content
         content = sanitize_html_for_telegram(lesson_data['content'])
         
+        # Log the content length for debugging
+        logger.info(f"Lesson content length: {len(content)} characters")
+        
         # Ensure paragraphs are properly separated
         if not content.startswith("\n"):
             content = "\n" + content
@@ -461,54 +481,153 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
         if len(message_title + message_content + attribution) <= 1024:
             caption = message_title + message_content + attribution
             remaining_text = None
+            logger.info("Content fits in caption - sending in single message")
         else:
             # Message too long, send content separately
             remaining_text = message_content + attribution
+            logger.info(f"Content too long for caption ({len(message_title + message_content + attribution)} chars) - splitting into multiple messages")
         
         if image_data:
             try:
                 if "url" in image_data:
                     # Send image with caption from URL
-                    await bot.send_photo(
-                        chat_id=target_id,
-                        photo=image_data["url"],
-                        caption=caption,
-                        parse_mode=ParseMode.HTML
-                    )
-                elif "file" in image_data:
-                    # Send image with caption from file
-                    with open(image_data["file"], "rb") as photo:
+                    try:
                         await bot.send_photo(
                             chat_id=target_id,
-                            photo=photo,
+                            photo=image_data["url"],
                             caption=caption,
                             parse_mode=ParseMode.HTML
                         )
-                
-                # If there's remaining text, send it as a separate message
-                if remaining_text:
-                    await bot.send_message(
-                        chat_id=target_id,
-                        text=remaining_text,
-                        parse_mode=ParseMode.HTML
-                    )
+                        
+                        # If there's remaining text that didn't fit in the caption, send it separately
+                        if remaining_text:
+                            logger.info(f"Sending remaining content in separate message ({len(remaining_text)} chars)")
+                            if len(remaining_text) > 4000:
+                                # Split into multiple messages if needed
+                                await send_large_text_in_chunks(bot, target_id, remaining_text)
+                            else:
+                                await bot.send_message(
+                                    chat_id=target_id,
+                                    text=remaining_text,
+                                    parse_mode=ParseMode.HTML
+                                )
+                    except Exception as url_error:
+                        logger.error(f"Error sending image from URL: {url_error}")
+                        # Try to download it first
+                        try:
+                            local_path = await image_manager.image_manager.save_image_locally(image_data["url"])
+                            if local_path:
+                                with open(local_path, "rb") as photo:
+                                    await bot.send_photo(
+                                        chat_id=target_id,
+                                        photo=photo,
+                                        caption=caption,
+                                        parse_mode=ParseMode.HTML
+                                    )
+                                    
+                                    # If there's remaining text that didn't fit in the caption, send it separately
+                                    if remaining_text:
+                                        logger.info(f"Sending remaining content in separate message ({len(remaining_text)} chars)")
+                                        if len(remaining_text) > 4000:
+                                            # Split into multiple messages if needed
+                                            await send_large_text_in_chunks(bot, target_id, remaining_text)
+                                        else:
+                                            await bot.send_message(
+                                                chat_id=target_id,
+                                                text=remaining_text,
+                                                parse_mode=ParseMode.HTML
+                                            )
+                            else:
+                                # If we can't download, send without image
+                                raise Exception("Failed to save image locally")
+                        except Exception as local_error:
+                            logger.error(f"Error sending image after local save: {local_error}")
+                            # Send the message without an image
+                            if len(caption) > 4000:
+                                # Send in multiple parts if too large
+                                await send_large_text_in_chunks(bot, target_id, caption)
+                            else:
+                                await update.message.reply_text(
+                                    caption,
+                                    parse_mode=ParseMode.MARKDOWN
+                                )
+                elif "file" in image_data:
+                    # Send image with caption from file
+                    try:
+                        with open(image_data["file"], "rb") as photo:
+                            await bot.send_photo(
+                                chat_id=target_id,
+                                photo=photo,
+                                caption=caption,
+                                parse_mode=ParseMode.HTML
+                            )
+                            
+                            # If there's remaining text that didn't fit in the caption, send it separately
+                            if remaining_text:
+                                logger.info(f"Sending remaining content in separate message ({len(remaining_text)} chars)")
+                                if len(remaining_text) > 4000:
+                                    # Split into multiple messages if needed
+                                    await send_large_text_in_chunks(bot, target_id, remaining_text)
+                                else:
+                                    await bot.send_message(
+                                        chat_id=target_id,
+                                        text=remaining_text,
+                                        parse_mode=ParseMode.HTML
+                                    )
+                    except Exception as file_error:
+                        logger.error(f"Error sending image from file: {file_error}")
+                        # Send the message without an image
+                        if len(caption) > 4000:
+                            # Send in multiple parts if too large
+                            await send_large_text_in_chunks(bot, target_id, caption)
+                        else:
+                            await update.message.reply_text(
+                                caption,
+                                parse_mode=ParseMode.MARKDOWN
+                            )
+            
             except Exception as e:
                 logger.error(f"Error sending image with message: {e}")
                 # Fallback to sending complete message without image
                 full_message = message_title + message_content + attribution
+                
+                if len(full_message) > 4000:
+                    # Send title first
+                    await bot.send_message(
+                        chat_id=target_id,
+                        text=message_title,
+                        parse_mode=ParseMode.HTML
+                    )
+                    # Then content split into chunks if necessary
+                    content_and_attribution = message_content + attribution
+                    await send_large_text_in_chunks(bot, target_id, content_and_attribution)
+                else:
+                    await bot.send_message(
+                        chat_id=target_id,
+                        text=full_message,
+                        parse_mode=ParseMode.HTML
+                    )
+        else:
+            # No image available, send text only
+            full_message = message_title + message_content
+            
+            # Check if message needs to be split (Telegram has a 4096 character limit)
+            if len(full_message) > 4000:
+                # Send title first
+                await bot.send_message(
+                    chat_id=target_id,
+                    text=message_title,
+                    parse_mode=ParseMode.HTML
+                )
+                
+                # Split content into chunks of max 4000 characters, respecting paragraph breaks when possible
+                await send_large_text_in_chunks(bot, target_id, message_content)
+            else:
                 await bot.send_message(
                     chat_id=target_id,
                     text=full_message,
                     parse_mode=ParseMode.HTML
                 )
-        else:
-            # No image available, send text only
-            full_message = message_title + message_content
-            await bot.send_message(
-                chat_id=target_id,
-                text=full_message,
-                parse_mode=ParseMode.HTML
-            )
         
         # Send the quiz
         quiz_question = lesson_data['quiz_question']
@@ -618,20 +737,48 @@ async def image_command(update: Update, context: CallbackContext):
     logger.info(f"User {user_id} requested image for theme: {theme}")
     
     # Send typing action to show processing
-    await update.message.reply_chat_action("typing")
+    try:
+        await update.message.reply_chat_action("typing")
+    except Exception as e:
+        logger.warning(f"Failed to send chat action: {e}")
     
     # Send a message indicating we're generating the image
-    processing_message = await update.message.reply_text(
-        f"🎨 Generating a UI/UX image about *{theme}*...\n"
-        "This may take a few moments.",
-        parse_mode=ParseMode.MARKDOWN
-    )
+    processing_message = None
+    try:
+        processing_message = await update.message.reply_text(
+            f"🎨 Generating a UI/UX image about *{theme}*...\n"
+            "This may take a few moments.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send processing message: {e}")
     
     try:
-        # Get an image for the theme
-        image_data = await image_manager.get_image_for_lesson(theme)
+        # Get an image for the theme with timeout protection
+        image_data = None
+        try:
+            # Set a reasonable timeout for image generation
+            image_task = asyncio.create_task(image_manager.get_image_for_lesson(theme))
+            image_data = await asyncio.wait_for(image_task, timeout=30.0)
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout while generating image for theme: {theme}")
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except:
+                    pass
+            await update.message.reply_text(
+                f"Sorry, generating an image for '{theme}' is taking longer than expected. "
+                "Please try again later or with a different theme."
+            )
+            return
         
         if not image_data:
+            if processing_message:
+                try:
+                    await processing_message.delete()
+                except:
+                    pass
             await update.message.reply_text(
                 f"Sorry, I couldn't generate an image for '{theme}'. "
                 "Please try a different theme or try again later."
@@ -649,22 +796,64 @@ async def image_command(update: Update, context: CallbackContext):
             caption += f"📸 {image_data['attribution']}"
         
         # Delete the "processing" message
-        await processing_message.delete()
+        if processing_message:
+            try:
+                await processing_message.delete()
+            except Exception as e:
+                logger.warning(f"Failed to delete processing message: {e}")
         
         # Send the image
         if "url" in image_data:
-            await update.message.reply_photo(
-                photo=image_data["url"],
-                caption=caption,
-                parse_mode=ParseMode.MARKDOWN
-            )
-        elif "file" in image_data:
-            with open(image_data["file"], "rb") as photo:
+            try:
                 await update.message.reply_photo(
-                    photo=photo,
+                    photo=image_data["url"],
                     caption=caption,
                     parse_mode=ParseMode.MARKDOWN
                 )
+            except Exception as img_error:
+                logger.error(f"Failed to send image from URL: {img_error}")
+                # Try to download the image first, then send as file
+                try:
+                    local_path = await image_manager.image_manager.save_image_locally(image_data["url"])
+                    if local_path:
+                        with open(local_path, "rb") as photo:
+                            await update.message.reply_photo(
+                                photo=photo,
+                                caption=caption,
+                                parse_mode=ParseMode.MARKDOWN
+                            )
+                    else:
+                        raise Exception("Failed to save image locally")
+                except Exception as local_error:
+                    logger.error(f"Error sending image after local save: {local_error}")
+                    # Send the message without an image
+                    if len(caption) > 4000:
+                        # Send in multiple parts if too large
+                        await send_large_text_in_chunks(context.bot, update.effective_chat.id, caption)
+                    else:
+                        await update.message.reply_text(
+                            caption,
+                            parse_mode=ParseMode.MARKDOWN
+                        )
+        elif "file" in image_data:
+            try:
+                with open(image_data["file"], "rb") as photo:
+                    await update.message.reply_photo(
+                        photo=photo,
+                        caption=caption,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+            except Exception as file_error:
+                logger.error(f"Error sending image from file: {file_error}")
+                # Send the message without an image
+                if len(caption) > 4000:
+                    # Send in multiple parts if too large
+                    await send_large_text_in_chunks(context.bot, update.effective_chat.id, caption)
+                else:
+                    await update.message.reply_text(
+                        caption,
+                        parse_mode=ParseMode.MARKDOWN
+                    )
                 
         # Optionally save the image locally
         if getattr(settings, "SAVE_IMAGES_LOCALLY", False) and "url" in image_data:
@@ -675,9 +864,109 @@ async def image_command(update: Update, context: CallbackContext):
                 
     except Exception as e:
         logger.error(f"Error generating image: {e}")
+        if processing_message:
+            try:
+                await processing_message.delete()
+            except:
+                pass
         await update.message.reply_text(
             "Sorry, something went wrong while generating the image. Please try again later."
         )
+
+
+async def send_large_text_in_chunks(bot, chat_id: int, text: str, max_chunk_size: int = 4000):
+    """
+    Split large text into smaller chunks and send them as separate messages.
+    Attempts to split at paragraph boundaries when possible.
+    
+    Args:
+        bot: The Telegram bot instance
+        chat_id: The target chat ID
+        text: The text to send
+        max_chunk_size: Maximum size of each chunk (default: 4000 characters)
+    """
+    if not text:
+        return
+        
+    logger.info(f"Splitting large text ({len(text)} chars) into multiple messages")
+    
+    if len(text) <= max_chunk_size:
+        # Send as single message if it fits
+        await bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            parse_mode=ParseMode.HTML
+        )
+        return
+        
+    # Find paragraph breaks to split on
+    paragraphs = re.split(r'\n\n+', text)
+    
+    chunks = []
+    current_chunk = ""
+    
+    for paragraph in paragraphs:
+        # If adding this paragraph would exceed the limit, start a new chunk
+        if len(current_chunk) + len(paragraph) + 2 > max_chunk_size:
+            # If the current paragraph alone is too big, split it further
+            if len(paragraph) > max_chunk_size:
+                # Add current chunk if not empty
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                    current_chunk = ""
+                
+                # Split large paragraph into smaller pieces
+                for i in range(0, len(paragraph), max_chunk_size - 200):
+                    sub_para = paragraph[i:i + max_chunk_size - 200]
+                    
+                    # Only add as a complete chunk if it's large enough
+                    if len(sub_para) >= max_chunk_size - 500:
+                        chunks.append(sub_para.strip())
+                    else:
+                        current_chunk = sub_para
+            else:
+                # Add the current chunk and start a new one
+                chunks.append(current_chunk.strip())
+                current_chunk = paragraph
+        else:
+            # Add paragraph to current chunk with proper spacing
+            if current_chunk:
+                current_chunk += "\n\n" + paragraph
+            else:
+                current_chunk = paragraph
+    
+    # Add the last chunk if not empty
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+    
+    # Send each chunk as a separate message
+    logger.info(f"Sending content in {len(chunks)} separate messages")
+    for i, chunk in enumerate(chunks):
+        # Add continuation indicator for better readability
+        if i > 0:
+            chunk = "⟨...continued⟩\n\n" + chunk
+        if i < len(chunks) - 1:
+            chunk = chunk + "\n\n⟨continued...⟩"
+            
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=chunk,
+                parse_mode=ParseMode.HTML
+            )
+            # Small delay to keep messages in order and avoid rate limits
+            await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.error(f"Error sending message chunk {i+1}/{len(chunks)}: {e}")
+            # Try to send without HTML formatting as fallback
+            try:
+                clean_chunk = re.sub(r'<[^>]*>', '', chunk)
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=clean_chunk
+                )
+            except Exception as inner_e:
+                logger.error(f"Failed to send even plaintext chunk: {inner_e}")
 
 
 def setup_handlers(application):

@@ -8,17 +8,31 @@ services:
     container_name: uiux-lesson-bot
     restart: unless-stopped
     environment:
+      # Core API Keys
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4}
       - UNSPLASH_API_KEY=${UNSPLASH_API_KEY}
+      - PEXELS_API_KEY=${PEXELS_API_KEY}
+      
+      # Bot Configuration
       - CHANNEL_ID=${CHANNEL_ID}
       - ADMIN_USER_IDS=${ADMIN_USER_IDS}
-      - TZ=Asia/Kolkata
+      - MAX_DAILY_LESSONS=${MAX_DAILY_LESSONS:-5}
+      
+      # Image Generation Settings
+      - ENABLE_DALLE_IMAGES=${ENABLE_DALLE_IMAGES:-false}
+      - DALLE_MODEL=${DALLE_MODEL:-dall-e-2}
+      - IMAGE_PREFERENCE=${IMAGE_PREFERENCE:-dalle,unsplash,pexels,local}
+      - SAVE_IMAGES_LOCALLY=${SAVE_IMAGES_LOCALLY:-true}
+      
+      # System Settings
+      - TZ=${TZ:-Asia/Kolkata}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FILE=/app/data/bot.log
       - DATA_DIR=/app/data
       - REQUEST_TIMEOUT=${REQUEST_TIMEOUT:-30}
+      
     volumes:
       - uiux_bot_data:/app/data
       - ../images:/app/images

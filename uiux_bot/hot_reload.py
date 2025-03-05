@@ -51,17 +51,33 @@ class CodeChangeHandler(FileSystemEventHandler):
         # Kill the current process if it exists
         if current_process:
             logger.info("Stopping current process...")
-            # Send SIGTERM to let the process clean up
-            os.kill(current_process.pid, signal.SIGTERM)
+            
+            # Send SIGINT (Ctrl+C) which triggers the bot's clean shutdown handlers
+            os.kill(current_process.pid, signal.SIGINT)
+            
             try:
-                # Wait for the process to terminate gracefully
-                current_process.wait(timeout=5)
+                # Wait for the process to terminate gracefully with increased timeout
+                # Telegram API needs more time to properly clean up connections
+                logger.info("Waiting for clean shutdown...")
+                current_process.wait(timeout=10)
             except subprocess.TimeoutExpired:
-                # Force kill if it doesn't terminate
-                logger.warning("Process didn't terminate gracefully, forcing kill...")
-                os.kill(current_process.pid, signal.SIGKILL)
+                # If it doesn't terminate after timeout, try SIGTERM
+                logger.warning("Clean shutdown timed out, sending SIGTERM...")
+                os.kill(current_process.pid, signal.SIGTERM)
+                
+                try:
+                    # Wait again
+                    current_process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # Force kill if it still doesn't terminate
+                    logger.warning("Process didn't terminate after SIGTERM, forcing kill...")
+                    os.kill(current_process.pid, signal.SIGKILL)
             
             logger.info("Process stopped")
+            
+            # Add a delay to ensure Telegram API connections are fully closed
+            # This helps prevent the "terminated by other getUpdates request" error
+            time.sleep(2)
         
         # Start the application
         logger.info("Starting application...")
