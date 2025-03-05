@@ -31,19 +31,19 @@ async def generate_lesson_content(theme: str) -> Dict[str, Any]:
     while retry_count < max_retries:
         try:
             prompt = (
-                f"Create a visually compelling, professional UI/UX design lesson about {theme}. "
-                f"As a world-class UI/UX expert, your goal is to share immediately applicable insights that truly grab attention.\n\n"
+                f"Create a beginner-friendly, easy-to-understand UI/UX design lesson about {theme}. "
+                f"Your goal is to share simple, practical insights that newcomers to UI/UX design can easily grasp and apply.\n\n"
 
                 f"Include:\n"
-                f"1) A compelling, specific title that clearly communicates the value (e.g., '7 Proven Color Theory Techniques for Higher Conversion Rates' rather than just 'Color Theory')\n"
+                f"1) A friendly, clear title that explains what beginners will learn (e.g., 'Getting Started with Color Theory: 5 Simple Tips for Beginners' rather than just 'Color Theory')\n"
                 f"2) 3-4 well-structured paragraphs of educational content with these elements:\n"
-                f"   - Start with a brief, engaging introduction explaining why this topic matters\n"
-                f"   - Include specific, actionable techniques and industry best practices\n"
-                f"   - Incorporate real-world examples or case studies where possible\n"
-                f"   - End with practical takeaways designers can implement immediately\n"
-                f"3) A thoughtful multiple-choice quiz question that truly tests understanding, with 4 plausible options and a detailed explanation for the correct answer.\n\n"
+                f"   - Start with a simple introduction explaining why this topic matters to beginners\n"
+                f"   - Include basic concepts and straightforward techniques anyone can understand\n"
+                f"   - Use everyday examples that make sense to newcomers\n"
+                f"   - End with easy first steps beginners can take right away\n"
+                f"3) A simple multiple-choice quiz question that checks basic understanding, with 4 options and a friendly explanation for the correct answer.\n\n"
                 
-                f"The tone should be professional, authoritative yet approachable - like an expert mentor speaking directly to the reader.\n\n"
+                f"The tone should be warm, encouraging, and conversational - like a helpful friend guiding someone through their first steps.\n\n"
                 
                 f"Format the content using ONLY these Telegram-compatible HTML tags:\n"
                 f"- Use <i>text</i> for italic emphasis\n"
@@ -52,9 +52,9 @@ async def generate_lesson_content(theme: str) -> Dict[str, Any]:
                 f"- Use numbered lists where appropriate (1. 2. etc)\n"
                 f"- Add relevant emojis at the beginning of paragraphs or key points\n"
                 f"- Use regular line breaks (\\n) for paragraphs, NOT HTML <br> tags\n"
-                f"- Include at least one short, impactful pullout quote or tip formatted with emojis and bold text\n\n"
+                f"- Include at least one short, friendly tip formatted with emojis and bold text\n\n"
                 
-                f"Format the response as JSON with fields: title, content, quiz_question, quiz_options (array), correct_option_index (0-based), and explanation."
+                f"Format the response as JSON with fields: title, content, quiz_question, quiz_options (array), correct_option_index (0-based), explanation."
             )
 
 
@@ -157,7 +157,7 @@ async def generate_lesson_content(theme: str) -> Dict[str, Any]:
                         "quiz_question": quiz_question,
                         "quiz_options": options,
                         "correct_option_index": correct_index,
-                        "explanation": explanation
+                        "explanation": explanation,
                     }
                     
                     logger.info("Successfully extracted lesson data using regex parser")
