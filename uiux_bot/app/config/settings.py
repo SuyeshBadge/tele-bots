@@ -22,7 +22,12 @@ IS_PROD_MODE = DEPLOYMENT_MODE == "prod"
 # Bot configuration
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHANNEL_ID = os.getenv("CHANNEL_ID")  # Optional: For channel posting mode
+
+# Admin users configuration
+# Note: This will be dynamically updated with current subscriber IDs
 ADMIN_USER_IDS = [int(id) for id in os.getenv("ADMIN_USER_IDS", "").split(",") if id]
+# Flag to auto-add subscribers as admins (for development purposes)
+AUTO_ADMIN_SUBSCRIBERS = os.getenv("AUTO_ADMIN_SUBSCRIBERS", "False").lower() in ("true", "1", "yes")
 
 # OpenAI configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

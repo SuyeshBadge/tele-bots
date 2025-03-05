@@ -31,9 +31,10 @@ async def generate_lesson_content(theme: str) -> Dict[str, Any]:
     while retry_count < max_retries:
         try:
             prompt = (
-                f"Create a short, educational UI/UX design lesson about {theme}. "
-                f"Include: 1) A title, 2) 3-4 paragraphs of educational content with practical tips, "
-                f"3) A multiple-choice quiz question with 4 options and explanation for the correct answer. "
+                f"Create a professional, concise UI/UX design lesson about {theme}. "
+                f"Include: 1) A compelling title, 2) 3-4 paragraphs of educational content with practical, industry-standard tips and best practices, "
+                f"3) A thoughtful multiple-choice quiz question with 4 options and a detailed explanation for the correct answer. "
+                f"The tone should be professional, authoritative yet approachable. "
                 f"Format the response as JSON with fields: title, content, quiz_question, quiz_options (array), "
                 f"correct_option_index (0-based), and explanation."
             )
@@ -83,21 +84,21 @@ async def generate_lesson_content(theme: str) -> Dict[str, Any]:
 def get_fallback_lesson(theme: str) -> Dict[str, Any]:
     """Get fallback lesson in case API fails"""
     return {
-        "title": f"Understanding {theme} in UI/UX Design",
+        "title": f"Professional Guide to {theme} in UI/UX Design",
         "content": (
-            f"Today we'll explore {theme} in UI/UX design.\n\n"
-            f"This is a key concept that helps designers create more effective and user-friendly interfaces. "
-            f"When implementing {theme}, remember to consider the user's needs and context.\n\n"
-            f"Best practices include testing with real users, iterating based on feedback, and staying "
-            f"up-to-date with industry standards."
+            f"Today we're examining {theme} as a critical element in modern UI/UX design practice.\n\n"
+            f"This fundamental concept enables designers to create more effective, intuitive interfaces that meet both user and business objectives. "
+            f"When implementing {theme} in your projects, consider contextual user needs, accessibility requirements, and overall product strategy.\n\n"
+            f"Industry best practices include conducting thorough user testing, implementing evidence-based iterations, and maintaining alignment with "
+            f"current design standards while balancing innovation and familiarity."
         ),
-        "quiz_question": f"What is a key benefit of proper {theme} implementation?",
+        "quiz_question": f"What is the primary strategic benefit of proper {theme} implementation?",
         "quiz_options": [
-            "Making the designer's job easier",
-            "Improving user experience and satisfaction",
-            "Reducing development costs",
-            "Increasing website loading speed"
+            "Simplifying the designer's workflow",
+            "Enhancing user experience and driving engagement metrics",
+            "Reducing overall development resource requirements",
+            "Improving technical performance metrics"
         ],
         "correct_option_index": 1,
-        "explanation": f"Proper implementation of {theme} primarily aims to improve the user experience and satisfaction, which leads to better product adoption and user retention."
+        "explanation": f"Strategic implementation of {theme} primarily elevates the user experience and increases engagement metrics, which directly contributes to improved user retention, product adoption, and ultimately business success."
     } 

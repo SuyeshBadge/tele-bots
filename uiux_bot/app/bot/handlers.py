@@ -5,6 +5,7 @@ Telegram bot command handlers for the UI/UX Lesson Bot.
 import time
 import random
 import logging
+import json
 from datetime import datetime
 from typing import Dict, Any, Optional
 
@@ -26,20 +27,30 @@ async def start_command(update: Update, context: CallbackContext):
     
     if user_id not in persistence.get_subscribers():
         persistence.add_subscriber(user_id)
+        
+        # Update admin users if enabled
+        if settings.AUTO_ADMIN_SUBSCRIBERS and user_id not in settings.ADMIN_USER_IDS:
+            settings.ADMIN_USER_IDS.append(user_id)
+            logger.info(f"Added new subscriber {user_id} as admin")
+        
         await update.message.reply_text(
-            "Welcome to the UI/UX Lesson Bot! 🎨\n\n"
-            "You are now subscribed to receive UI/UX lessons twice a day (10:00 AM and 6:00 PM IST).\n\n"
-            "Commands:\n"
-            "/nextlesson - Get a lesson right now\n"
-            "/stop - Unsubscribe from lessons\n"
-            "/help - Show this help message\n"
-            "/health - Check bot health status"
+            "👋 *Welcome to the Professional UI/UX Design Academy* 🎨\n\n"
+            "You're now subscribed to receive expert UI/UX design lessons twice daily (10:00 AM and 6:00 PM IST).\n\n"
+            "*Available Commands:*\n"
+            "• /nextlesson - Request an immediate lesson\n"
+            "• /stop - Unsubscribe from lessons\n"
+            "• /help - View all commands and information\n"
+            "• /health - Check system status\n\n"
+            "We're excited to help you enhance your design skills with industry-leading content.",
+            parse_mode=ParseMode.MARKDOWN
         )
         logger.info(f"New subscriber: {user_id}")
     else:
         await update.message.reply_text(
-            "You're already subscribed to UI/UX lessons! 👍\n"
-            "Use /nextlesson to get a lesson right now."
+            "✅ *You're already subscribed to our UI/UX lessons*\n\n"
+            "Your subscription is active and you'll continue receiving professional design insights.\n\n"
+            "Use /nextlesson to request an immediate lesson on demand.",
+            parse_mode=ParseMode.MARKDOWN
         )
     
     persistence.update_health_status()
@@ -52,14 +63,19 @@ async def stop_command(update: Update, context: CallbackContext):
     if user_id in persistence.get_subscribers():
         persistence.remove_subscriber(user_id)
         await update.message.reply_text(
-            "You've been unsubscribed from UI/UX lessons. 😢\n"
-            "You can subscribe again anytime with /start."
+            "🔔 *Subscription Update*\n\n"
+            "You've been unsubscribed from our UI/UX design lessons.\n\n"
+            "We value your feedback - if you have a moment, we'd appreciate knowing why you've chosen to unsubscribe.\n\n"
+            "You can reactivate your subscription anytime with the /start command.",
+            parse_mode=ParseMode.MARKDOWN
         )
         logger.info(f"Subscriber removed: {user_id}")
     else:
         await update.message.reply_text(
-            "You're not currently subscribed to UI/UX lessons.\n"
-            "Use /start to subscribe."
+            "ℹ️ *Subscription Status*\n\n"
+            "You don't currently have an active subscription to our UI/UX lessons.\n\n"
+            "Use /start to subscribe and begin receiving professional design insights.",
+            parse_mode=ParseMode.MARKDOWN
         )
     
     persistence.update_health_status()
@@ -68,16 +84,16 @@ async def stop_command(update: Update, context: CallbackContext):
 async def help_command(update: Update, context: CallbackContext):
     """Handler for /help command - show help information"""
     await update.message.reply_text(
-        "🎨 *UI/UX Lesson Bot Help* 🎨\n\n"
-        "This bot sends UI/UX design lessons twice daily (10 AM and 6 PM IST).\n\n"
-        "*Commands:*\n"
-        "/start - Subscribe to lessons\n"
-        "/stop - Unsubscribe from lessons\n"
-        "/nextlesson - Get a lesson immediately\n"
-        "/help - Show this help message\n"
-        "/health - Check bot health status\n\n"
-        "Each lesson includes educational content and a quiz to test your knowledge.\n"
-        "Enjoy learning about UI/UX design! 🚀",
+        "🎓 *UI/UX Design Academy - Command Guide* 🎨\n\n"
+        "Our service delivers professional UI/UX design lessons twice daily (10 AM and 6 PM IST).\n\n"
+        "*Command Reference:*\n"
+        "• /start - Activate your subscription\n"
+        "• /stop - Deactivate your subscription\n"
+        "• /nextlesson - Request an immediate lesson\n"
+        "• /help - Display this reference guide\n"
+        "• /health - View system status\n\n"
+        "Each lesson includes expert educational content and an interactive quiz to reinforce your learning.\n\n"
+        "Thank you for choosing our platform to develop your UI/UX design expertise.",
         parse_mode=ParseMode.MARKDOWN
     )
     persistence.update_health_status()
@@ -119,19 +135,21 @@ async def next_lesson_command(update: Update, context: CallbackContext):
             # Format the time differently based on the cooldown duration
             if cooldown >= 3600:  # 1 hour or more
                 minutes_left = time_left // 60
-                time_msg = f"{minutes_left} more minutes"
+                time_msg = f"{minutes_left} minutes"
             else:
-                time_msg = f"{time_left} more seconds"
+                time_msg = f"{time_left} seconds"
             
             # Different message based on deployment mode
             if settings.IS_DEV_MODE:
-                mode_msg = f"[DEV MODE] Cooldown set to {cooldown} seconds for testing purposes."
+                mode_msg = f"[DEV MODE] Cooldown setting: {cooldown} seconds."
             else:
-                mode_msg = f"This limit helps prevent abuse and keeps costs down. Thank you for understanding!"
+                mode_msg = f"This helps us maintain service quality and ensures optimal resource allocation."
                 
             await update.message.reply_text(
-                f"⏳ Please wait {time_msg} before requesting another lesson.\n"
-                f"{mode_msg}"
+                f"⏱️ *Request Limit Notice*\n\n"
+                f"Please wait {time_msg} before requesting another lesson.\n\n"
+                f"{mode_msg}",
+                parse_mode=ParseMode.MARKDOWN
             )
             return
         # Set last request time
@@ -139,7 +157,11 @@ async def next_lesson_command(update: Update, context: CallbackContext):
     
     # Only subscribers can request on-demand lessons
     if user_id in persistence.get_subscribers() or user_id in settings.ADMIN_USER_IDS:
-        await update.message.reply_text("Generating your UI/UX lesson, please wait...")
+        await update.message.reply_text(
+            "🔄 *Generating your design lesson*\n\n"
+            "We're preparing a professional UI/UX lesson for you. This may take a moment...",
+            parse_mode=ParseMode.MARKDOWN
+        )
         try:
             await send_lesson(user_id=user_id, bot=context.bot)
             logger.info(f"On-demand lesson sent to user {user_id}")
@@ -147,7 +169,10 @@ async def next_lesson_command(update: Update, context: CallbackContext):
             logger.error(f"Error sending on-demand lesson: {e}")
             persistence.update_health_status(error=True)
             await update.message.reply_text(
-                "Sorry, there was an error generating your lesson. Please try again later."
+                "⚠️ *Service Interruption*\n\n"
+                "We encountered an issue while generating your lesson. Please try again later.\n\n"
+                "Our team has been notified of this error.",
+                parse_mode=ParseMode.MARKDOWN
             )
     else:
         await update.message.reply_text(
@@ -264,15 +289,23 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
     
     target_id = channel_id if channel_id else user_id
     
-    # Select a random theme for the lesson
-    theme = random.choice(settings.UI_UX_THEMES)
+    # Get lesson history for this user to avoid repetition
+    user_history = persistence.get_user_history(target_id)
+    recent_themes = user_history.get("recent_themes", [])
+    
+    # Select a theme that hasn't been used recently
+    available_themes = [theme for theme in settings.UI_UX_THEMES if theme not in recent_themes]
+    if not available_themes:  # If all themes have been used, reset
+        available_themes = settings.UI_UX_THEMES
+    
+    theme = random.choice(available_themes)
     
     # Generate lesson content
     lesson_data = await openai_client.generate_lesson_content(theme)
     
     # Format the message
     message = (
-        f"🎨 *{lesson_data['title']}* 🎨\n\n"
+        f"📚 *{lesson_data['title']}* 📚\n\n"
         f"{lesson_data['content']}\n\n"
     )
     
@@ -283,11 +316,21 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
         parse_mode=ParseMode.MARKDOWN
     )
     
+    # Save this lesson's content to user history 
+    message_summary = {
+        "title": lesson_data['title'],
+        "theme": theme,
+        "timestamp": int(time.time()),
+        "content_summary": lesson_data['content'][:100] + "...",  # Store just a summary
+        "quiz_question": lesson_data['quiz_question']
+    }
+    persistence.update_user_history(target_id, theme, json.dumps(message_summary))
+    
     # Get and send an image
     image_data = await unsplash_client.get_image_for_lesson(theme)
     if image_data:
         try:
-            caption = f"Illustration for: {lesson_data['title']}"
+            caption = f"*Visual context for: {lesson_data['title']}*"
             
             # Add attribution if available
             if "attribution" in image_data and image_data["attribution"]:
@@ -298,7 +341,8 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
                 await bot.send_photo(
                     chat_id=target_id,
                     photo=image_data["url"],
-                    caption=caption
+                    caption=caption,
+                    parse_mode=ParseMode.MARKDOWN
                 )
             elif "file" in image_data:
                 # Send local image file
@@ -306,7 +350,8 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
                     await bot.send_photo(
                         chat_id=target_id,
                         photo=photo,
-                        caption=caption
+                        caption=caption,
+                        parse_mode=ParseMode.MARKDOWN
                     )
         except Exception as e:
             logger.error(f"Error sending image: {e}")

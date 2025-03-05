@@ -43,6 +43,10 @@ class UIUXLessonBot:
         unsplash_client.ensure_fallback_images()
         self.setup_signal_handlers()
         
+        # Update admin users if auto-admin is enabled
+        if settings.AUTO_ADMIN_SUBSCRIBERS:
+            self.update_admin_users()
+        
         # Initialize health check
         persistence.update_health_status()
 
@@ -83,6 +87,19 @@ class UIUXLessonBot:
         # Error handler
         self.application.add_error_handler(handlers.error_handler)
 
+    def update_admin_users(self):
+        """Update admin users list with current subscribers if auto-admin is enabled"""
+        if settings.AUTO_ADMIN_SUBSCRIBERS:
+            subscribers = persistence.get_subscribers()
+            if subscribers:
+                # Take the most recent subscriber (assuming it's the last one added)
+                # This is a simplification - in a real system you might want more sophisticated logic
+                latest_subscriber = list(subscribers)[-1] if subscribers else None
+                
+                if latest_subscriber and latest_subscriber not in settings.ADMIN_USER_IDS:
+                    settings.ADMIN_USER_IDS.append(latest_subscriber)
+                    logger.info(f"Added subscriber {latest_subscriber} as admin")
+
     def start(self):
         """Start the bot and scheduler"""
         try:
@@ -92,6 +109,11 @@ class UIUXLessonBot:
                 logger.info(f"Running in channel mode, posting to: {settings.CHANNEL_ID}")
             else:
                 logger.info(f"Running in subscription mode with {len(persistence.get_subscribers())} subscribers")
+            
+            # Update admin users if auto-admin is enabled
+            if settings.AUTO_ADMIN_SUBSCRIBERS:
+                self.update_admin_users()
+                logger.info(f"Auto-admin mode enabled, current admins: {settings.ADMIN_USER_IDS}")
             
             # Start the scheduler
             self.scheduler.start()
