@@ -5,6 +5,7 @@ Scheduler for sending UI/UX lessons at specified times.
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from datetime import datetime, timedelta
 
 from app.config import settings
 from app.utils import persistence
@@ -43,6 +44,17 @@ class LessonScheduler:
             misfire_grace_time=600,  # 10 minutes grace time for misfires
         )
         
+        # Add a test job to send a lesson immediately (for testing purposes)
+        if settings.IS_DEV_MODE:
+            self.scheduler.add_job(
+                self.send_scheduled_lesson,
+                'date',  # Run once at a specific time
+                run_date=datetime.now(settings.TIMEZONE) + timedelta(seconds=15),  # 15 seconds from now
+                id="test_lesson",
+                replace_existing=True,
+            )
+            logger.info("Development mode: Scheduled a test lesson to be sent in 15 seconds")
+            
         if settings.IS_DEV_MODE:
             logger.info("Development mode: Scheduled lessons at fixed times (10:00 AM and 6:00 PM IST)")
         else:

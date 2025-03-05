@@ -159,7 +159,7 @@ async def next_lesson_command(update: Update, context: CallbackContext):
     if user_id in persistence.get_subscribers() or user_id in settings.ADMIN_USER_IDS:
         await update.message.reply_text(
             "🔄 *Generating your design lesson*\n\n"
-            "We're preparing a professional UI/UX lesson for you. This may take a moment...",
+            "We're preparing a professional UI/UX lesson for you with the new combined message and image format. This may take a moment...",
             parse_mode=ParseMode.MARKDOWN
         )
         try:
@@ -176,7 +176,10 @@ async def next_lesson_command(update: Update, context: CallbackContext):
             )
     else:
         await update.message.reply_text(
-            "You need to subscribe first! Use /start to subscribe to UI/UX lessons."
+            "⚠️ *Subscription Required*\n\n"
+            "You need to be subscribed to request lessons on demand.\n\n"
+            "Subscribe using the /start command first.",
+            parse_mode=ParseMode.MARKDOWN
         )
     
     persistence.update_health_status()
@@ -303,18 +306,8 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
     # Generate lesson content
     lesson_data = await openai_client.generate_lesson_content(theme)
     
-    # Format the message
-    message = (
-        f"📚 *{lesson_data['title']}* 📚\n\n"
-        f"{lesson_data['content']}\n\n"
-    )
-    
-    # Send the main lesson
-    sent_message = await bot.send_message(
-        chat_id=target_id,
-        text=message,
-        parse_mode=ParseMode.MARKDOWN
-    )
+    # Get an image first, so we can send it together with the message
+    image_data = await unsplash_client.get_image_for_lesson(theme)
     
     # Save this lesson's content to user history 
     message_summary = {
@@ -326,18 +319,32 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
     }
     persistence.update_user_history(target_id, theme, json.dumps(message_summary))
     
-    # Get and send an image
-    image_data = await unsplash_client.get_image_for_lesson(theme)
+    # Format the message - don't include image text
+    message_title = f"📚 *{lesson_data['title']}* 📚\n\n"
+    message_content = f"{lesson_data['content']}\n\n"
+    
+    # Add attribution if available as a footer
+    attribution = ""
+    if image_data and "attribution" in image_data and image_data["attribution"]:
+        attribution = f"_Image: {image_data['attribution']}_\n\n"
+    
+    # Telegram has a caption limit of 1024 characters for photos
+    # If the full message is too long, we'll send the image with the title,
+    # then send the content as a separate message
+    caption = message_title
+    
+    # If content is short enough, include it in the caption
+    if len(message_title + message_content + attribution) <= 1024:
+        caption = message_title + message_content + attribution
+        remaining_text = None
+    else:
+        # Message too long, send content separately
+        remaining_text = message_content + attribution
+    
     if image_data:
         try:
-            caption = f"*Visual context for: {lesson_data['title']}*"
-            
-            # Add attribution if available
-            if "attribution" in image_data and image_data["attribution"]:
-                caption += f"\n{image_data['attribution']}"
-            
             if "url" in image_data:
-                # Send image from URL (Unsplash)
+                # Send image with caption from URL
                 await bot.send_photo(
                     chat_id=target_id,
                     photo=image_data["url"],
@@ -345,7 +352,7 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
                     parse_mode=ParseMode.MARKDOWN
                 )
             elif "file" in image_data:
-                # Send local image file
+                # Send image with caption from file
                 with open(image_data["file"], "rb") as photo:
                     await bot.send_photo(
                         chat_id=target_id,
@@ -353,8 +360,31 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
                         caption=caption,
                         parse_mode=ParseMode.MARKDOWN
                     )
+            
+            # If there's remaining text, send it as a separate message
+            if remaining_text:
+                await bot.send_message(
+                    chat_id=target_id,
+                    text=remaining_text,
+                    parse_mode=ParseMode.MARKDOWN
+                )
         except Exception as e:
-            logger.error(f"Error sending image: {e}")
+            logger.error(f"Error sending image with message: {e}")
+            # Fallback to sending complete message without image
+            full_message = message_title + message_content + attribution
+            await bot.send_message(
+                chat_id=target_id,
+                text=full_message,
+                parse_mode=ParseMode.MARKDOWN
+            )
+    else:
+        # No image available, send text only
+        full_message = message_title + message_content
+        await bot.send_message(
+            chat_id=target_id,
+            text=full_message,
+            parse_mode=ParseMode.MARKDOWN
+        )
     
     # Send the quiz
     await bot.send_poll(

@@ -49,6 +49,9 @@ class UIUXLessonBot:
         
         # Initialize health check
         persistence.update_health_status()
+        
+        # Track if the bot is shutting down
+        self.is_shutting_down = False
 
     def setup_signal_handlers(self):
         """Set up signal handlers for graceful shutdown"""
@@ -100,6 +103,40 @@ class UIUXLessonBot:
                     settings.ADMIN_USER_IDS.append(latest_subscriber)
                     logger.info(f"Added subscriber {latest_subscriber} as admin")
 
+    def shutdown(self):
+        """Properly shutdown the bot and clean up resources"""
+        if self.is_shutting_down:
+            return
+            
+        self.is_shutting_down = True
+        logger.info("Bot shutdown initiated")
+        
+        try:
+            # Save subscribers
+            persistence.save_subscribers()
+            
+            # Update health status
+            persistence.update_health_status()
+            
+            # Stop scheduler if it's running
+            if hasattr(self, 'scheduler'):
+                self.scheduler.shutdown()
+            
+            # Stop the application
+            loop = asyncio.get_event_loop()
+            if not loop.is_closed():
+                try:
+                    # Create a future to stop the application
+                    future = asyncio.ensure_future(self.application.stop())
+                    # Wait for the future with a timeout
+                    loop.run_until_complete(asyncio.wait_for(future, timeout=5.0))
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    logger.warning("Application stop timed out or was cancelled")
+        except Exception as e:
+            logger.error(f"Error during shutdown: {e}")
+        finally:
+            logger.info("Bot shutdown complete")
+
     def start(self):
         """Start the bot and scheduler"""
         try:
@@ -129,11 +166,6 @@ class UIUXLessonBot:
             logger.critical(f"Failed to start bot: {e}")
             raise
         finally:
-            # Save subscribers when shutting down
-            persistence.save_subscribers()
-            # Update health status
-            persistence.update_health_status()
-            # Stop scheduler if it's running
-            if hasattr(self, 'scheduler'):
-                self.scheduler.shutdown()
-            logger.info("Bot shutdown complete") 
+            # If we reach here through an exception, make sure to shutdown cleanly
+            if not self.is_shutting_down:
+                self.shutdown() 
