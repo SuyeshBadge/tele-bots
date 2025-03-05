@@ -93,6 +93,49 @@ uiux_bot/
 - **Health Monitoring**: Built-in health checks and status reporting
 - **Persistent Storage**: All subscriber data is stored persistently
 
+## Development Mode
+
+This project includes a hot reload functionality that automatically restarts the application when code changes are detected. This is particularly useful during development to quickly test changes without manually restarting the bot.
+
+### Using Hot Reload
+
+There are two ways to use the hot reload functionality:
+
+#### 1. Using the dev.py script:
+
+```bash
+python dev.py
+```
+
+This script automatically ensures all required dependencies are installed and starts the application with hot reload enabled.
+
+#### 2. Using the --dev flag:
+
+```bash
+python main.py --dev
+```
+
+This starts the main application with hot reload enabled.
+
+### How It Works
+
+The hot reload system:
+
+1. Monitors all Python files in the project directory and subdirectories
+2. When a file change is detected, it gracefully stops the current application
+3. Automatically restarts the application with the updated code
+4. Uses a cooldown period to prevent rapid restarts when multiple files are saved
+
+### Prerequisites
+
+Hot reload requires the watchdog package, which can be installed using:
+
+```bash
+pip install watchdog
+```
+
+This dependency is included in the requirements.txt file.
+
 ## License
 
 MIT License 

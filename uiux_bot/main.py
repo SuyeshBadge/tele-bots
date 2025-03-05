@@ -6,6 +6,8 @@ UI/UX Lesson Telegram Bot - Main Entry Point
 
 This bot provides educational UI/UX lessons twice a day (10:00 and 18:00 IST).
 It also includes quizzes to engage users and can generate custom images for lessons.
+
+Run with --dev flag to enable development mode with hot reload.
 """
 
 import asyncio
@@ -13,13 +15,35 @@ import logging
 import sys
 import nest_asyncio
 import signal
+import argparse
 
 from app.utils.logger import setup_logging
 from app.bot.bot import UIUXLessonBot
 
 
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description="UI/UX Lesson Bot")
+    parser.add_argument("--dev", action="store_true", help="Run in development mode with hot reload")
+    return parser.parse_args()
+
+
 def main():
     """Main function to run the bot"""
+    # Parse arguments
+    args = parse_args()
+    
+    # If in development mode, use hot reload
+    if args.dev:
+        try:
+            from hot_reload import start_hot_reload
+            print("Starting in development mode with hot reload...")
+            start_hot_reload()
+            return  # hot_reload will handle the application lifecycle
+        except ImportError:
+            print("Hot reload requires the watchdog package. Install with: pip install watchdog")
+            print("Continuing in normal mode...")
+    
     # Setup logging
     logger = setup_logging()
     

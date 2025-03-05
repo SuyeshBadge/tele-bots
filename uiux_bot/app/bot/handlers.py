@@ -6,6 +6,7 @@ import time
 import random
 import logging
 import json
+import re
 from datetime import datetime
 from typing import Dict, Any, Optional
 
@@ -19,6 +20,50 @@ from app.utils import persistence
 
 # Configure logger
 logger = logging.getLogger(__name__)
+
+
+def sanitize_html_for_telegram(text: str) -> str:
+    """
+    Simple HTML sanitization for Telegram messages.
+    Telegram supports limited HTML tags: <b>, <i>, <code>, <pre>, <a>.
+    """
+    if not text:
+        return ""
+        
+    # Convert markdown-style to HTML with simple replacements
+    # Process bold first (avoids issues with nested formatting)
+    text = text.replace("**", "<b>", 1)
+    while "**" in text:
+        text = text.replace("**", "</b>", 1)
+        if "**" in text:
+            text = text.replace("**", "<b>", 1)
+    
+    # Process italics after bold
+    text = text.replace("*", "<i>", 1)
+    while "*" in text:
+        text = text.replace("*", "</i>", 1)
+        if "*" in text:
+            text = text.replace("*", "<i>", 1)
+    
+    # Preserve and enhance paragraph formatting
+    
+    # First, convert all HTML breaks to consistent newlines
+    text = text.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
+    
+    # Ensure paragraphs have at least double newlines between them
+    # Replace single newlines only if they're not already part of a paragraph break
+    text = re.sub(r'(?<!\n)\n(?!\n)', '\n\n', text)
+    
+    # Make paragraph breaks consistently double newlines (not more)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    # Add spacing after bullet points for better readability
+    text = re.sub(r'(•|·|\*|\\-|-)(\s*)', r'\1 ', text)
+    
+    # Make sure each paragraph starts with proper indentation for readability
+    text = re.sub(r'\n\n([^•\*\-<])', r'\n\n\1', text)
+    
+    return text
 
 
 async def start_command(update: Update, context: CallbackContext):
@@ -157,29 +202,47 @@ async def next_lesson_command(update: Update, context: CallbackContext):
     
     # Only subscribers can request on-demand lessons
     if user_id in persistence.get_subscribers() or user_id in settings.ADMIN_USER_IDS:
-        await update.message.reply_text(
-            "🔄 *Generating your design lesson*\n\n"
-            "We're preparing a professional UI/UX lesson for you with the new combined message and image format. This may take a moment...",
-            parse_mode=ParseMode.MARKDOWN
+        # Send a temporary message that will be deleted after lesson is sent
+        temp_message = await update.message.reply_text(
+            "🔮✨ <b>AI DESIGN ACADEMY</b> ✨🔮\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "📲 <b>GENERATING PERSONALIZED LESSON</b> 📲\n\n"
+            "🤖 Our advanced AI is crafting a <b>custom UI/UX masterclass</b> specifically for you!\n\n"
+            "🌟 <b>WHAT YOU'LL DISCOVER:</b> 🌟\n"
+            "• Industry-leading design techniques\n"
+            "• Professional workflow optimization\n"
+            "• Creative problem-solving approaches\n"
+            "• User psychology insights\n\n"
+            "⚡ <b>WHY THIS MATTERS:</b> ⚡\n"
+            "• Instantly elevate your design portfolio\n"
+            "• Stand out in competitive job markets\n"
+            "• Create more intuitive digital experiences\n"
+            "• Apply cutting-edge design principles\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⏳ <b>Your personalized lesson will appear momentarily...</b> ⏳",
+            parse_mode=ParseMode.HTML
         )
         try:
             await send_lesson(user_id=user_id, bot=context.bot)
+            # Delete the temporary "generating" message after lesson is sent
+            await temp_message.delete()
             logger.info(f"On-demand lesson sent to user {user_id}")
         except Exception as e:
             logger.error(f"Error sending on-demand lesson: {e}")
             persistence.update_health_status(error=True)
-            await update.message.reply_text(
-                "⚠️ *Service Interruption*\n\n"
+            # Don't delete the temp message if there was an error, update it instead
+            await temp_message.edit_text(
+                "⚠️ <b>Service Interruption</b> ⚠️\n\n"
                 "We encountered an issue while generating your lesson. Please try again later.\n\n"
                 "Our team has been notified of this error.",
-                parse_mode=ParseMode.MARKDOWN
+                parse_mode=ParseMode.HTML
             )
     else:
         await update.message.reply_text(
-            "⚠️ *Subscription Required*\n\n"
+            "⚠️ <b>Subscription Required</b> ⚠️\n\n"
             "You need to be subscribed to request lessons on demand.\n\n"
             "Subscribe using the /start command first.",
-            parse_mode=ParseMode.MARKDOWN
+            parse_mode=ParseMode.HTML
         )
     
     persistence.update_health_status()
@@ -281,121 +344,220 @@ async def error_handler(update: Update, context: CallbackContext):
 
 
 async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
-    """Send a complete lesson to a user or channel"""
-    if not user_id and not channel_id:
-        logger.error("No target specified for lesson")
-        return
-    
-    if not bot:
-        logger.error("Bot instance is required")
-        return
-    
-    target_id = channel_id if channel_id else user_id
-    
-    # Get lesson history for this user to avoid repetition
-    user_history = persistence.get_user_history(target_id)
-    recent_themes = user_history.get("recent_themes", [])
-    
-    # Select a theme that hasn't been used recently
-    available_themes = [theme for theme in settings.UI_UX_THEMES if theme not in recent_themes]
-    if not available_themes:  # If all themes have been used, reset
-        available_themes = settings.UI_UX_THEMES
-    
-    theme = random.choice(available_themes)
-    
-    # Generate lesson content
-    lesson_data = await openai_client.generate_lesson_content(theme)
-    
-    # Get an image first, so we can send it together with the message
-    image_data = await unsplash_client.get_image_for_lesson(theme)
-    
-    # Save this lesson's content to user history 
-    message_summary = {
-        "title": lesson_data['title'],
-        "theme": theme,
-        "timestamp": int(time.time()),
-        "content_summary": lesson_data['content'][:100] + "...",  # Store just a summary
-        "quiz_question": lesson_data['quiz_question']
-    }
-    persistence.update_user_history(target_id, theme, json.dumps(message_summary))
-    
-    # Format the message - don't include image text
-    message_title = f"📚 *{lesson_data['title']}* 📚\n\n"
-    message_content = f"{lesson_data['content']}\n\n"
-    
-    # Add attribution if available as a footer
-    attribution = ""
-    if image_data and "attribution" in image_data and image_data["attribution"]:
-        attribution = f"_Image: {image_data['attribution']}_\n\n"
-    
-    # Telegram has a caption limit of 1024 characters for photos
-    # If the full message is too long, we'll send the image with the title,
-    # then send the content as a separate message
-    caption = message_title
-    
-    # If content is short enough, include it in the caption
-    if len(message_title + message_content + attribution) <= 1024:
-        caption = message_title + message_content + attribution
-        remaining_text = None
-    else:
-        # Message too long, send content separately
-        remaining_text = message_content + attribution
-    
-    if image_data:
-        try:
-            if "url" in image_data:
-                # Send image with caption from URL
-                await bot.send_photo(
-                    chat_id=target_id,
-                    photo=image_data["url"],
-                    caption=caption,
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            elif "file" in image_data:
-                # Send image with caption from file
-                with open(image_data["file"], "rb") as photo:
+    """Send a UI/UX design lesson."""
+    try:
+        # Get bot instance if not provided
+        if not bot:
+            from app.bot import get_bot
+            bot = await get_bot()
+        
+        target_id = channel_id if channel_id else user_id
+        
+        # Get lesson history for this user to avoid repetition
+        user_history = persistence.get_user_history(target_id)
+        recent_themes = user_history.get("recent_themes", [])
+        
+        # Select a theme that hasn't been used recently
+        available_themes = [theme for theme in settings.UI_UX_THEMES if theme not in recent_themes]
+        if not available_themes:  # If all themes have been used, reset
+            available_themes = settings.UI_UX_THEMES
+            
+        theme = random.choice(available_themes)
+        
+        # Generate lesson content
+        lesson_data = await openai_client.generate_lesson_content(theme)
+        
+        # Ensure lesson_data has all required fields
+        required_fields = {
+            'title': str,
+            'content': str,
+            'quiz_question': str,
+            'quiz_options': list,
+            'correct_option_index': int,
+            'explanation': str
+        }
+        
+        for field, expected_type in required_fields.items():
+            if field not in lesson_data:
+                logger.error(f"Missing required field in lesson data: {field}")
+                lesson_data[field] = "" if expected_type == str else ([] if expected_type == list else 0)
+            elif not isinstance(lesson_data[field], expected_type):
+                logger.error(f"Field {field} has wrong type. Expected {expected_type}, got {type(lesson_data[field])}")
+                if expected_type == str:
+                    lesson_data[field] = str(lesson_data[field])
+                elif expected_type == list and isinstance(lesson_data[field], str):
+                    # Try to convert string to list if possible
+                    try:
+                        if lesson_data[field].startswith('[') and lesson_data[field].endswith(']'):
+                            import ast
+                            lesson_data[field] = ast.literal_eval(lesson_data[field])
+                        else:
+                            lesson_data[field] = [lesson_data[field]]
+                    except:
+                        lesson_data[field] = ["Option A", "Option B", "Option C", "Option D"]
+                elif expected_type == int:
+                    try:
+                        lesson_data[field] = int(lesson_data[field])
+                    except:
+                        lesson_data[field] = 0
+
+        # Get an image
+        image_data = await unsplash_client.get_image_for_lesson(theme)
+        
+        # Save this lesson's content to user history 
+        message_summary = {
+            "title": lesson_data['title'],
+            "theme": theme,
+            "timestamp": int(time.time()),
+            "content_summary": lesson_data['content'][:100] + "...",  # Store just a summary
+            "quiz_question": lesson_data['quiz_question']
+        }
+        persistence.update_user_history(target_id, theme, json.dumps(message_summary))
+        
+        # Ensure content is properly formatted using our sanitize function
+        clean_title = lesson_data['title'].replace('*', '')  # Remove any asterisks from title
+        
+        # Sanitize content using our helper function
+        # Make sure we have proper newlines in the content
+        content = sanitize_html_for_telegram(lesson_data['content'])
+        
+        # Ensure paragraphs are properly separated
+        if not content.startswith("\n"):
+            content = "\n" + content
+        
+        # Format the message with enhanced styling using HTML
+        message_title = f"✨ <b>{clean_title}</b> ✨\n\n"
+        message_content = f"{content}\n\n"
+        
+        # Add a visually appealing separator
+        message_content += "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        
+        # Add attribution if available
+        attribution = ""
+        if image_data and "attribution" in image_data and image_data["attribution"]:
+            attribution = f"📸 <i>{image_data['attribution']}</i>\n\n"
+        
+        # Telegram has a caption limit of 1024 characters
+        caption = message_title
+        
+        # If content is short enough, include it in the caption
+        if len(message_title + message_content + attribution) <= 1024:
+            caption = message_title + message_content + attribution
+            remaining_text = None
+        else:
+            # Message too long, send content separately
+            remaining_text = message_content + attribution
+        
+        if image_data:
+            try:
+                if "url" in image_data:
+                    # Send image with caption from URL
                     await bot.send_photo(
                         chat_id=target_id,
-                        photo=photo,
+                        photo=image_data["url"],
                         caption=caption,
-                        parse_mode=ParseMode.MARKDOWN
+                        parse_mode=ParseMode.HTML
                     )
-            
-            # If there's remaining text, send it as a separate message
-            if remaining_text:
+                elif "file" in image_data:
+                    # Send image with caption from file
+                    with open(image_data["file"], "rb") as photo:
+                        await bot.send_photo(
+                            chat_id=target_id,
+                            photo=photo,
+                            caption=caption,
+                            parse_mode=ParseMode.HTML
+                        )
+                
+                # If there's remaining text, send it as a separate message
+                if remaining_text:
+                    await bot.send_message(
+                        chat_id=target_id,
+                        text=remaining_text,
+                        parse_mode=ParseMode.HTML
+                    )
+            except Exception as e:
+                logger.error(f"Error sending image with message: {e}")
+                # Fallback to sending complete message without image
+                full_message = message_title + message_content + attribution
                 await bot.send_message(
                     chat_id=target_id,
-                    text=remaining_text,
-                    parse_mode=ParseMode.MARKDOWN
+                    text=full_message,
+                    parse_mode=ParseMode.HTML
                 )
-        except Exception as e:
-            logger.error(f"Error sending image with message: {e}")
-            # Fallback to sending complete message without image
-            full_message = message_title + message_content + attribution
+        else:
+            # No image available, send text only
+            full_message = message_title + message_content
             await bot.send_message(
                 chat_id=target_id,
                 text=full_message,
-                parse_mode=ParseMode.MARKDOWN
+                parse_mode=ParseMode.HTML
             )
-    else:
-        # No image available, send text only
-        full_message = message_title + message_content
-        await bot.send_message(
-            chat_id=target_id,
-            text=full_message,
-            parse_mode=ParseMode.MARKDOWN
-        )
-    
-    # Send the quiz
-    await bot.send_poll(
-        chat_id=target_id,
-        question=lesson_data['quiz_question'],
-        options=lesson_data['quiz_options'],
-        type=Poll.QUIZ,
-        correct_option_id=lesson_data['correct_option_index'],
-        explanation=lesson_data['explanation'],
-        is_anonymous=True
-    )
-    
-    # Update health status
-    persistence.update_health_status(lesson_sent=True) 
+        
+        # Send the quiz
+        quiz_question = lesson_data['quiz_question']
+        # Strip HTML tags - Telegram poll API doesn't support HTML formatting
+        quiz_question = re.sub(r'<[^>]*>', '', quiz_question)
+        # Clean up any markdown formatting
+        quiz_question = quiz_question.replace('**', '').replace('*', '')
+        
+        # Format without HTML tags since polls don't support HTML
+        question = f"🧠 TEST YOUR KNOWLEDGE: 🧠\n\n{quiz_question}"
+        
+        if len(question) > 300:
+            # Truncate the question, but keep the intro part
+            intro = "🧠 TEST YOUR KNOWLEDGE: 🧠\n\n"
+            remaining_length = 300 - len(intro) - 3  # 3 for the "..."
+            truncated_q = quiz_question[:remaining_length] + "..."
+            question = intro + truncated_q
+            
+        # Clean the options
+        options = []
+        for option in lesson_data['quiz_options']:
+            # Clean option formatting - strip HTML and normalize spaces
+            clean_option = option.replace("<br>", " ").replace("\n", " ")
+            clean_option = re.sub(r'<[^>]*>', '', clean_option)  # Remove HTML tags
+            clean_option = clean_option.replace('**', '').replace('*', '')  # Remove markdown
+            
+            if len(clean_option) > 100:
+                clean_option = clean_option[:97] + "..."
+            options.append(clean_option)
+            
+        # Clean explanation text too
+        explanation = lesson_data['explanation'].replace("<br>", " ").replace("\n", " ")
+        explanation = re.sub(r'<[^>]*>', '', explanation)  # Remove HTML tags
+        explanation = explanation.replace('**', '').replace('*', '')  # Remove markdown
+        if len(explanation) > 200:
+            explanation = explanation[:197] + "..."
+            
+        try:
+            await bot.send_poll(
+                chat_id=target_id,
+                question=question,
+                options=options,
+                type=Poll.QUIZ,
+                correct_option_id=lesson_data['correct_option_index'],
+                explanation=explanation,
+                is_anonymous=True
+            )
+            logger.info("Quiz sent")
+        except Exception as e:
+            logger.error(f"Error sending poll: {e}")
+            # Send as a text message instead
+            poll_text = f"Quiz: {question}\n\n"
+            for i, option in enumerate(options):
+                poll_text += f"{i+1}. {option}\n"
+            poll_text += f"\n✅ Answer: Option {lesson_data['correct_option_index'] + 1}\n\n"
+            poll_text += f"💡 Explanation: {explanation}"
+            
+            await bot.send_message(
+                chat_id=target_id,
+                text=poll_text,
+                parse_mode=ParseMode.HTML
+            )
+        
+        # Update health status
+        persistence.update_health_status(lesson_sent=True)
+        return lesson_data
+    except Exception as e:
+        logger.error(f"Error sending lesson: {e}")
+        return None 

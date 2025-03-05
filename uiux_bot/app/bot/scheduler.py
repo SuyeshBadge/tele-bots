@@ -44,17 +44,6 @@ class LessonScheduler:
             misfire_grace_time=600,  # 10 minutes grace time for misfires
         )
         
-        # Add a test job to send a lesson immediately (for testing purposes)
-        if settings.IS_DEV_MODE:
-            self.scheduler.add_job(
-                self.send_scheduled_lesson,
-                'date',  # Run once at a specific time
-                run_date=datetime.now(settings.TIMEZONE) + timedelta(seconds=15),  # 15 seconds from now
-                id="test_lesson",
-                replace_existing=True,
-            )
-            logger.info("Development mode: Scheduled a test lesson to be sent in 15 seconds")
-            
         if settings.IS_DEV_MODE:
             logger.info("Development mode: Scheduled lessons at fixed times (10:00 AM and 6:00 PM IST)")
         else:
@@ -79,6 +68,15 @@ class LessonScheduler:
     async def send_scheduled_lesson(self):
         """Send scheduled lesson to all subscribers or channel"""
         logger.info("Sending scheduled lesson")
+        
+        # Get current hour to verify we're running at the correct time
+        current_hour = datetime.now(settings.TIMEZONE).hour
+        
+        # Only allow sending at the scheduled hours (10 AM and 6 PM)
+        if current_hour not in [10, 18] and not settings.IS_DEV_MODE:
+            logger.warning(f"Attempted to send scheduled lesson outside designated hours (current hour: {current_hour})")
+            return
+            
         lesson_success = False
         
         try:

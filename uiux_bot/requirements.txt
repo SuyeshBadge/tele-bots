@@ -14,4 +14,5 @@ pytest-mock==3.12.0
 flake8==6.1.0
 black==23.11.0
 certifi==2023.11.17
-nest_asyncio==1.5.8 
+nest_asyncio==1.5.8
+watchdog==3.0.0 
