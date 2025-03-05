@@ -107,7 +107,14 @@ If you encounter issues:
 1. Check the logs: `fly logs`
 2. Verify that all required secrets are set: `fly secrets list`
 3. Ensure volumes are mounted correctly: `fly volumes list`
-4. For more help, visit [Fly.io's documentation](https://fly.io/docs/)
+4. If you see an error about files not being found, make sure your fly.toml doesn't reference non-existent local files
+
+### Logs in Deployed Application
+
+In the deployed application:
+- All logs are stored in `/app/data/logs` inside the container 
+- This is part of the persistent volume, so logs are preserved across deployments
+- You can access logs both through `fly logs` and by checking the logs directory in your persistent volume
 
 ## Maintenance
 

@@ -21,7 +21,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Create directory for persistent data and logs
-RUN mkdir -p /app/data /app/images/fallback /app/logs
+RUN mkdir -p /app/data /app/data/logs /app/images/fallback
 
 # Copy the application code
 COPY . .
@@ -30,7 +30,7 @@ COPY . .
 RUN echo 'import http.server\nimport socketserver\n\nclass HealthCheckHandler(http.server.SimpleHTTPRequestHandler):\n    def do_GET(self):\n        if self.path == "/health":\n            self.send_response(200)\n            self.send_header("Content-type", "text/plain")\n            self.end_headers()\n            self.wfile.write(b"OK")\n        else:\n            self.send_response(404)\n            self.end_headers()\n\nHandler = HealthCheckHandler\nhttpd = socketserver.TCPServer(("", 8080), Handler)\n\nprint("Starting health check server on port 8080")\nhttpd.serve_forever()' > /app/health_check.py
 
 # Set volume for persistent data
-VOLUME ["/app/data", "/app/images", "/app/logs"]
+VOLUME ["/app/data", "/app/images"]
 
 # Start both the health check server and the bot
 CMD ["sh", "-c", "python health_check.py & python main.py"] 

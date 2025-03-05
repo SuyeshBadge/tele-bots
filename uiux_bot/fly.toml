@@ -1,4 +1,4 @@
-app = "uiux-lesson-bot"
+app = "tele-bots"
 primary_region = "iad" # Change to your preferred region: https://fly.io/docs/reference/regions/
 
 kill_signal = "SIGINT"
@@ -68,7 +68,5 @@ kill_timeout = 30 # Increased timeout for graceful shutdown
   auto_extend_size_increment = "1GB"
   auto_extend_size_limit = "10GB"
 
-# Ensure proper file logging storage
-[[files]]
-  guest_path = "/app/logs"
-  local_path = "logs" 
+# The files section below was causing errors - logs directory doesn't exist
+# We'll use the volume mount for logs instead 
