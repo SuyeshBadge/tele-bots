@@ -29,6 +29,15 @@ This checklist helps ensure that the UI/UX Lesson Bot is properly configured and
 
 ## Deployment Steps
 
+### Fly.io Deployment
+1. [ ] Configure `fly.toml` with appropriate app name and region
+2. [ ] Set all required secrets with `fly secrets set`
+3. [ ] Create persistent volume with `fly volumes create uiux_bot_data --size 1`
+4. [ ] Deploy with `fly launch` or `fly deploy`
+5. [ ] Check logs with `fly logs` to verify successful startup
+6. [ ] Test bot functionality with a few test commands
+7. [ ] See `docs/FLY_DEPLOYMENT.md` for detailed instructions
+
 ### Docker Deployment (Recommended)
 1. [ ] Copy the .env.example file to .env and fill in all values
 2. [ ] Navigate to the docker directory
@@ -77,4 +86,13 @@ This checklist helps ensure that the UI/UX Lesson Bot is properly configured and
 - [ ] Monitor rate limits on image APIs
 - [ ] Consider upgrading to higher tier API plans if usage grows
 - [ ] Add more fallback images for variety
-- [ ] Monitor subscriber growth and adjust server resources accordingly 
+- [ ] Monitor subscriber growth and adjust server resources accordingly
+- [ ] For Fly.io deployments, consider upgrading VM size or enabling auto-scaling
+
+## Cloud Platform Specific Checks
+
+### Fly.io
+- [ ] Persistent volumes are properly configured and mounted
+- [ ] Health check endpoint is responding correctly
+- [ ] Application metrics are being collected
+- [ ] Consider setting up automatic backups for volumes 

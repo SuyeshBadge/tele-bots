@@ -1,0 +1,74 @@
+app = "uiux-lesson-bot"
+primary_region = "iad" # Change to your preferred region: https://fly.io/docs/reference/regions/
+
+kill_signal = "SIGINT"
+kill_timeout = 30 # Increased timeout for graceful shutdown
+
+[build]
+  # You can specify a Docker image or Dockerfile here
+  # If using a Dockerfile in the project root:
+  dockerfile = "Dockerfile"
+
+[env]
+  # Set non-sensitive environment variables here
+  # Sensitive values should be added as secrets using 'fly secrets set'
+  LOG_LEVEL = "INFO"
+  ENVIRONMENT = "production"
+  IMAGE_PREFERENCE = "dalle,unsplash,pexels,local"
+  # Add other non-sensitive environment variables as needed
+
+[http_service]
+  internal_port = 8080 # Adjust if your app listens on a different port
+  force_https = true
+  auto_stop_machines = false # Set to true if you want machines to stop when idle
+  auto_start_machines = true
+  min_machines_running = 1 # Keep at least one instance running
+
+[checks]
+  # Define health checks to ensure your bot is running properly
+  [checks.health]
+    port = 8080
+    type = "http"
+    interval = "10s"
+    timeout = "2s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/health"
+    protocol = "http"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+  processes = ["app"]
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+[metrics]
+  port = 9091
+  path = "/metrics"
+
+# Define VM resources based on expected load
+[vm]
+  # Choose an appropriate size for your needs
+  # Consider memory requirements for image generation
+  size = "shared-cpu-1x"
+  memory = "512MB" # Increase if your bot needs more memory for image processing
+
+[[mounts]]
+  source = "uiux_bot_data"
+  destination = "/app/data"
+  auto_extend_size_threshold = 80
+  auto_extend_size_increment = "100MB"
+  auto_extend_size_limit = "1GB"
+
+# Ensure proper file logging storage
+[[files]]
+  guest_path = "/app/logs"
+  local_path = "logs" 
