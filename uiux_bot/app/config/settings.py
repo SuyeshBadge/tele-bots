@@ -34,6 +34,12 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4")  # Allow configurable model
 DISABLE_OPENAI = os.getenv("DISABLE_OPENAI", "False").lower() in ("true", "1", "yes")
 
+# Image source configuration
+ENABLE_DALLE_IMAGES = os.getenv("ENABLE_DALLE_IMAGES", "False").lower() in ("true", "1", "yes")
+DALLE_MODEL = os.getenv("DALLE_MODEL", "dall-e-2")  # 'dall-e-2' or 'dall-e-3'
+PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")  # For Pexels stock photos
+IMAGE_PREFERENCE = os.getenv("IMAGE_PREFERENCE", "dalle,unsplash,pexels,local").lower()  # Comma-separated list of preferred sources
+
 # Unsplash configuration
 UNSPLASH_API_KEY = os.getenv("UNSPLASH_API_KEY", "")  # For Unsplash images
 

@@ -1,10 +1,10 @@
-python-telegram-bot==20.7
-openai==1.6.1
+python-telegram-bot>=20.4
+openai>=1.1.0
 requests==2.31.0
-python-dotenv==1.0.0
+python-dotenv>=1.0.0
 apscheduler==3.10.4
-pytz==2023.3
-aiohttp==3.9.1
+pytz>=2023.3
+aiohttp>=3.8.5
 tenacity==8.2.3
 pydantic==2.5.2
 pydantic-settings==2.1.0
@@ -13,6 +13,7 @@ pytest-asyncio==0.21.1
 pytest-mock==3.12.0
 flake8==6.1.0
 black==23.11.0
-certifi==2023.11.17
+certifi>=2023.7.22
 nest_asyncio==1.5.8
-watchdog==3.0.0 
+watchdog>=3.0.0
+Pillow>=10.0.0 

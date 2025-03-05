@@ -27,10 +27,11 @@ async def get_image_for_lesson(theme: str) -> Optional[Dict[str, Any]]:
             url = f"https://api.unsplash.com/search/photos"
             params = {
                 "query": search_term,
-                "per_page": 1,
+                "per_page": 100,
                 "orientation": "landscape",
             }
             headers = {"Authorization": f"Client-ID {settings.UNSPLASH_API_KEY}"}
+
             
             # Create SSL context with proper certificate verification
             ssl_context = ssl.create_default_context(cafile=certifi.where())
@@ -43,10 +44,11 @@ async def get_image_for_lesson(theme: str) -> Optional[Dict[str, Any]]:
                 async with session.get(url, headers=headers, params=params, timeout=settings.REQUEST_TIMEOUT) as response:
                     if response.status == 200:
                         data = await response.json()
+                        random_index = random.randint(0, len(data["results"]) - 1)
                         if data.get("results") and len(data["results"]) > 0:
-                            image_url = data["results"][0]["urls"]["regular"]
+                            image_url = data["results"][random_index]["urls"]["regular"]
                             # Get photographer attribution
-                            photographer = data["results"][0]["user"]["name"]
+                            photographer = data["results"][random_index]["user"]["name"]
                             attribution = f"Photo by {photographer} on Unsplash"
                             return {"url": image_url, "attribution": attribution}
         except Exception as e:

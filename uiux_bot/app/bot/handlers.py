@@ -15,7 +15,8 @@ from telegram.constants import ParseMode
 from telegram.ext import CallbackContext
 
 from app.config import settings
-from app.api import openai_client, unsplash_client
+from app.api import openai_client
+from app.api import image_manager
 from app.utils import persistence
 
 # Configure logger
@@ -127,21 +128,24 @@ async def stop_command(update: Update, context: CallbackContext):
 
 
 async def help_command(update: Update, context: CallbackContext):
-    """Handler for /help command - show help information"""
-    await update.message.reply_text(
-        "🎓 *UI/UX Design Academy - Command Guide* 🎨\n\n"
-        "Our service delivers professional UI/UX design lessons twice daily (10 AM and 6 PM IST).\n\n"
-        "*Command Reference:*\n"
-        "• /start - Activate your subscription\n"
-        "• /stop - Deactivate your subscription\n"
-        "• /nextlesson - Request an immediate lesson\n"
-        "• /help - Display this reference guide\n"
-        "• /health - View system status\n\n"
-        "Each lesson includes expert educational content and an interactive quiz to reinforce your learning.\n\n"
-        "Thank you for choosing our platform to develop your UI/UX design expertise.",
-        parse_mode=ParseMode.MARKDOWN
+    """Display help information."""
+    help_text = (
+        "🔸 <b>UI/UX Lesson Bot Commands</b> 🔸\n\n"
+        "/start - Subscribe to daily UI/UX lessons\n"
+        "/stop - Unsubscribe from lessons\n"
+        "/nextlesson - Request a new lesson immediately\n"
+        "/image <theme> - Generate a UI/UX image on a specific theme\n"
+        "/health - Check bot status\n"
+        "/help - Show this help message\n\n"
+        
+        "📚 <b>About This Bot</b>\n"
+        "This bot sends UI/UX design lessons twice daily (10:00 and 18:00 IST).\n"
+        "Each lesson includes educational content, a quiz, and a relevant image.\n\n"
+        
+        "Images are provided by Unsplash, DALL-E, and other sources, with proper attribution."
     )
-    persistence.update_health_status()
+    
+    await update.message.reply_text(help_text, parse_mode=ParseMode.HTML)
 
 
 async def health_command(update: Update, context: CallbackContext):
@@ -401,8 +405,8 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
                     except:
                         lesson_data[field] = 0
 
-        # Get an image
-        image_data = await unsplash_client.get_image_for_lesson(theme)
+        # Get an image using the enhanced image manager
+        image_data = await image_manager.get_image_for_lesson(theme)
         
         # Save this lesson's content to user history 
         message_summary = {
@@ -412,6 +416,19 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
             "content_summary": lesson_data['content'][:100] + "...",  # Store just a summary
             "quiz_question": lesson_data['quiz_question']
         }
+        
+        # Also save image information if available
+        if image_data and "url" in image_data:
+            message_summary["image_url"] = image_data["url"]
+            message_summary["image_source"] = image_data.get("attribution", "Unknown source")
+            
+            # Optionally save the image locally for future use
+            if getattr(settings, "SAVE_IMAGES_LOCALLY", False) and "url" in image_data:
+                try:
+                    await image_manager.image_manager.save_image_locally(image_data["url"])
+                except Exception as e:
+                    logger.error(f"Failed to save image locally: {e}")
+                
         persistence.update_user_history(target_id, theme, json.dumps(message_summary))
         
         # Ensure content is properly formatted using our sanitize function
@@ -561,3 +578,121 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
     except Exception as e:
         logger.error(f"Error sending lesson: {e}")
         return None 
+
+
+async def image_command(update: Update, context: CallbackContext):
+    """Generate an image related to a UI/UX theme."""
+    user_id = update.effective_user.id
+    
+    # Check if user has permission
+    if not persistence.is_subscriber(user_id) and user_id not in settings.ADMIN_USER_IDS:
+        await update.message.reply_text(
+            "Sorry, you need to be a subscriber to use this feature. "
+            "Type /start to subscribe."
+        )
+        return
+    
+    # Check rate limits for non-admin users
+    if user_id not in settings.ADMIN_USER_IDS:
+        # Check if user has exceeded daily lesson limit
+        today_count = persistence.get_user_daily_count(user_id)
+        if today_count >= settings.MAX_DAILY_LESSONS:
+            await update.message.reply_text(
+                f"You've reached your daily limit of {settings.MAX_DAILY_LESSONS} custom lessons/images. "
+                "Please try again tomorrow!"
+            )
+            return
+    
+    # Get theme from command arguments
+    args = context.args
+    if not args or not args[0]:
+        # If no theme provided, show help message
+        await update.message.reply_text(
+            "Please provide a UI/UX theme to generate an image for.\n\n"
+            "Example: /image color theory\n\n"
+            "Try themes like: color theory, typography, minimalism, dark mode, user journey, etc."
+        )
+        return
+    
+    theme = ' '.join(args)
+    logger.info(f"User {user_id} requested image for theme: {theme}")
+    
+    # Send typing action to show processing
+    await update.message.reply_chat_action("typing")
+    
+    # Send a message indicating we're generating the image
+    processing_message = await update.message.reply_text(
+        f"🎨 Generating a UI/UX image about *{theme}*...\n"
+        "This may take a few moments.",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    
+    try:
+        # Get an image for the theme
+        image_data = await image_manager.get_image_for_lesson(theme)
+        
+        if not image_data:
+            await update.message.reply_text(
+                f"Sorry, I couldn't generate an image for '{theme}'. "
+                "Please try a different theme or try again later."
+            )
+            return
+        
+        # Update user's daily count for rate limiting
+        if user_id not in settings.ADMIN_USER_IDS:
+            persistence.increment_user_daily_count(user_id)
+        
+        # Send the image
+        caption = f"🎨 *UI/UX Design: {theme}*\n\n"
+        
+        if "attribution" in image_data and image_data["attribution"]:
+            caption += f"📸 {image_data['attribution']}"
+        
+        # Delete the "processing" message
+        await processing_message.delete()
+        
+        # Send the image
+        if "url" in image_data:
+            await update.message.reply_photo(
+                photo=image_data["url"],
+                caption=caption,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        elif "file" in image_data:
+            with open(image_data["file"], "rb") as photo:
+                await update.message.reply_photo(
+                    photo=photo,
+                    caption=caption,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                
+        # Optionally save the image locally
+        if getattr(settings, "SAVE_IMAGES_LOCALLY", False) and "url" in image_data:
+            try:
+                await image_manager.image_manager.save_image_locally(image_data["url"])
+            except Exception as e:
+                logger.error(f"Failed to save image locally: {e}")
+                
+    except Exception as e:
+        logger.error(f"Error generating image: {e}")
+        await update.message.reply_text(
+            "Sorry, something went wrong while generating the image. Please try again later."
+        )
+
+
+def setup_handlers(application):
+    """Setup message handlers for the bot"""
+    # Command handlers
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("stop", stop_command))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("health", health_command))
+    application.add_handler(CommandHandler("nextlesson", next_lesson_command))
+    application.add_handler(CommandHandler("image", image_command))  # Add the new image command
+    
+    # Admin commands
+    application.add_handler(CommandHandler("stats", stats_command))
+    application.add_handler(CommandHandler("broadcast", broadcast_command))
+    
+    # Register error handler
+    application.add_error_handler(error_handler) 

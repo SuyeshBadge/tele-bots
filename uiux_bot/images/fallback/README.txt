@@ -1,6 +1,6 @@
 FALLBACK IMAGES FOR UI/UX LESSON BOT
 
-This directory contains fallback images that will be used when the Unsplash API is unavailable or rate-limited.
+This directory contains fallback images that will be used when online image sources (DALL-E, Unsplash, Pexels) are unavailable or rate-limited.
 
 GUIDELINES:
 -----------
@@ -24,4 +24,4 @@ SUGGESTED TOPICS:
 - Accessibility design
 - Design systems
 
-NOTE: These images will only be used when the Unsplash API is unavailable, as a fallback mechanism to ensure lessons always have visual content. 
+NOTE: These images will only be used when online image sources are unavailable, as a fallback mechanism to ensure lessons always have visual content. 

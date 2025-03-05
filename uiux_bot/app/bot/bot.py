@@ -15,6 +15,7 @@ from telegram.ext import (
 
 from app.config import settings
 from app.api import unsplash_client
+from app.api import image_manager
 from app.utils import persistence
 from app.bot import handlers, scheduler
 
@@ -40,7 +41,13 @@ class UIUXLessonBot:
         # Setup handlers and initial data
         self.setup_handlers()
         persistence.load_subscribers()
+        
+        # Initialize image sources
         unsplash_client.ensure_fallback_images()
+        
+        # Log available image sources
+        self._log_image_sources()
+        
         self.setup_signal_handlers()
         
         # Update admin users if auto-admin is enabled
@@ -168,4 +175,25 @@ class UIUXLessonBot:
         finally:
             # If we reach here through an exception, make sure to shutdown cleanly
             if not self.is_shutting_down:
-                self.shutdown() 
+                self.shutdown()
+
+    def _log_image_sources(self):
+        """Log available image sources for debugging"""
+        sources = []
+        if getattr(settings, "ENABLE_DALLE_IMAGES", False) and settings.OPENAI_API_KEY:
+            sources.append("DALL-E")
+        if settings.UNSPLASH_API_KEY:
+            sources.append("Unsplash")
+        if getattr(settings, "PEXELS_API_KEY", None):
+            sources.append("Pexels")
+        sources.append("Local Fallback")
+        
+        logger.info(f"Available image sources: {', '.join(sources)}")
+        
+        # Parse image preference order
+        if hasattr(settings, "IMAGE_PREFERENCE"):
+            try:
+                preferences = settings.IMAGE_PREFERENCE.split(',')
+                logger.info(f"Image source preference order: {', '.join(preferences)}")
+            except:
+                logger.warning("Failed to parse IMAGE_PREFERENCE setting") 
