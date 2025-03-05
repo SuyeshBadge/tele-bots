@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  uiux-bot:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: uiux-lesson-bot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4}
+      - UNSPLASH_API_KEY=${UNSPLASH_API_KEY}
+      - CHANNEL_ID=${CHANNEL_ID}
+      - ADMIN_USER_IDS=${ADMIN_USER_IDS}
+      - TZ=Asia/Kolkata
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - LOG_FILE=/app/data/bot.log
+      - DATA_DIR=/app/data
+      - REQUEST_TIMEOUT=${REQUEST_TIMEOUT:-30}
+    volumes:
+      - uiux_bot_data:/app/data
+      - ../images:/app/images
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, sys; sys.exit(0 if os.path.exists('/app/data/subscribers.json') else 1)"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  uiux_bot_data:
+    name: uiux_bot_data 
