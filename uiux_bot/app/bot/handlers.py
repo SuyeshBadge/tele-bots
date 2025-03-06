@@ -137,7 +137,7 @@ async def help_command(update: Update, context: CallbackContext):
         "/start - Subscribe to daily UI/UX lessons\n"
         "/stop - Unsubscribe from lessons\n"
         "/nextlesson - Request a new lesson immediately\n"
-        "/image <theme> - Generate a UI/UX image on a specific theme\n"
+        "/image [theme] - Generate a UI/UX image on a specific theme\n"
         "/health - Check bot status\n"
         "/help - Show this help message\n\n"
         
