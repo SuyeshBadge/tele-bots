@@ -8,13 +8,13 @@ import logging
 import json
 import re
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 import asyncio
 import os
 
-from telegram import Update, Poll, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram import Update, Poll, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, PollAnswer
 from telegram.constants import ParseMode
-from telegram.ext import CallbackContext
+from telegram.ext import CallbackContext, CommandHandler, PollAnswerHandler
 from telegram.error import BadRequest
 
 from app.config import settings
@@ -25,6 +25,9 @@ from app.utils import persistence
 # Configure logger
 logger = logging.getLogger(__name__)
 
+# Dictionary to store active quizzes and their correct answers
+# Structure: {poll_id: {'correct_option': index, 'explanation': text, 'theme': str, 'question': str, 'options': list}}
+active_quizzes: Dict[str, Dict[str, Union[int, str, list]]] = {}
 
 def sanitize_html_for_telegram(text: str) -> str:
     """
@@ -144,6 +147,9 @@ async def help_command(update: Update, context: CallbackContext):
         "📚 <b>About This Bot</b>\n"
         "This bot sends UI/UX design lessons twice daily (10:00 and 18:00 IST).\n"
         "Each lesson includes educational content, a quiz, and a relevant image.\n\n"
+        
+        "📝 <b>Quiz Feature</b>\n"
+        "After answering a quiz, you'll receive personalized feedback and an explanation to enhance your learning.\n\n"
         
         "Images are provided by Unsplash, DALL-E, and other sources, with proper attribution."
     )
@@ -666,16 +672,29 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
             explanation = explanation[:197] + "..."
             
         try:
-            await bot.send_poll(
+            # Send the poll and get the message object that contains the poll
+            message = await bot.send_poll(
                 chat_id=target_id,
                 question=question,
                 options=options,
                 type=Poll.QUIZ,
                 correct_option_id=lesson_data['correct_option_index'],
-                explanation=explanation,
-                is_anonymous=True
+                explanation=None,  # Don't send explanation immediately
+                is_anonymous=False  # Need to be able to identify who answered
             )
             logger.info("Quiz sent")
+            
+            # Store the poll information for later reference
+            if message and message.poll:
+                poll_id = message.poll.id
+                active_quizzes[poll_id] = {
+                    'correct_option': lesson_data['correct_option_index'],
+                    'explanation': explanation,
+                    'theme': theme,  # Store theme for OpenAI explanation
+                    'question': quiz_question,  # Store full question
+                    'options': options  # Store options for custom explanation
+                }
+                logger.info(f"Stored quiz data for poll {poll_id}")
         except Exception as e:
             logger.error(f"Error sending poll: {e}")
             # Send as a text message instead
@@ -969,6 +988,88 @@ async def send_large_text_in_chunks(bot, chat_id: int, text: str, max_chunk_size
                 logger.error(f"Failed to send even plaintext chunk: {inner_e}")
 
 
+async def on_poll_answer(update: Update, context: CallbackContext):
+    """Handler for when users answer polls"""
+    answer = update.poll_answer
+    poll_id = answer.poll_id
+    user_id = answer.user.id
+    selected_option = answer.option_ids[0] if answer.option_ids else None
+    
+    # If this is one of our quizzes and has tracking info
+    if poll_id in active_quizzes:
+        quiz_data = active_quizzes[poll_id]
+        correct_option = quiz_data['correct_option']
+        theme = quiz_data.get('theme', 'UI/UX design')
+        question = quiz_data.get('question', '')
+        options = quiz_data.get('options', [])
+        
+        # User answered correctly
+        if selected_option == correct_option:
+            praise_messages = [
+                "🎉 Well done! That's correct!",
+                "👏 Excellent choice! You got it right!",
+                "✨ Great job! Your answer is correct!",
+                "🌟 Perfect! You've mastered this concept!",
+                "🏆 Correct! You're making excellent progress!"
+            ]
+            feedback = random.choice(praise_messages)
+        # User answered incorrectly
+        else:
+            motivation_messages = [
+                "📚 Good attempt! Learning comes from trying.",
+                "💪 Keep going! Every question helps you improve.",
+                "🔍 Almost there! Review the explanation below.",
+                "📝 Practice makes perfect! Try more questions to build your skills.",
+                "💡 Not quite, but that's how we learn! Check out the explanation."
+            ]
+            feedback = random.choice(motivation_messages)
+        
+        try:
+            # Get custom explanation from OpenAI
+            custom_explanation = await openai_client.generate_custom_explanation(
+                theme=theme,
+                quiz_question=question,
+                options=options,
+                correct_index=correct_option,
+                user_choice_index=selected_option
+            )
+            
+            # If we got a valid explanation from OpenAI, use it; otherwise fall back to the original
+            explanation = custom_explanation if custom_explanation else quiz_data['explanation']
+            
+            # Send feedback with explanation
+            full_message = f"{feedback}\n\n{explanation}"
+            
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=full_message,
+                parse_mode=ParseMode.HTML
+            )
+            logger.info(f"Sent custom quiz feedback to user {user_id}")
+            
+            # Clean up - remove this quiz from tracking
+            # This prevents sending multiple explanations if user changes answer
+            del active_quizzes[poll_id]
+        except Exception as e:
+            logger.error(f"Error sending quiz feedback: {e}")
+            
+            # Fallback to original explanation if we couldn't get a custom one
+            full_message = f"{feedback}\n\n💡 <b>Explanation:</b>\n{quiz_data['explanation']}"
+            
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=full_message,
+                    parse_mode=ParseMode.HTML
+                )
+                logger.info(f"Sent fallback quiz feedback to user {user_id}")
+                
+                # Clean up even on fallback
+                del active_quizzes[poll_id]
+            except Exception as inner_e:
+                logger.error(f"Error sending fallback feedback: {inner_e}")
+
+
 def setup_handlers(application):
     """Setup message handlers for the bot"""
     # Command handlers
@@ -978,6 +1079,9 @@ def setup_handlers(application):
     application.add_handler(CommandHandler("health", health_command))
     application.add_handler(CommandHandler("nextlesson", next_lesson_command))
     application.add_handler(CommandHandler("image", image_command))  # Add the new image command
+    
+    # Poll answer handler
+    application.add_handler(PollAnswerHandler(on_poll_answer))
     
     # Admin commands
     application.add_handler(CommandHandler("stats", stats_command))

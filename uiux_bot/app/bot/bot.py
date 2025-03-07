@@ -11,6 +11,7 @@ from telegram.ext import (
     Application,
     CommandHandler,
     CallbackContext,
+    PollAnswerHandler,
 )
 
 from app.config import settings
@@ -83,19 +84,8 @@ class UIUXLessonBot:
 
     def setup_handlers(self):
         """Setup command handlers for the bot"""
-        # Command handlers
-        self.application.add_handler(CommandHandler("start", handlers.start_command))
-        self.application.add_handler(CommandHandler("stop", handlers.stop_command))
-        self.application.add_handler(CommandHandler("nextlesson", handlers.next_lesson_command))
-        self.application.add_handler(CommandHandler("help", handlers.help_command))
-        self.application.add_handler(CommandHandler("health", handlers.health_command))
-        
-        # Admin commands
-        self.application.add_handler(CommandHandler("stats", handlers.stats_command))
-        self.application.add_handler(CommandHandler("broadcast", handlers.broadcast_command))
-        
-        # Error handler
-        self.application.add_error_handler(handlers.error_handler)
+        # Use the handlers module's setup_handlers function
+        handlers.setup_handlers(self.application)
 
     def update_admin_users(self):
         """Update admin users list with current subscribers if auto-admin is enabled"""
