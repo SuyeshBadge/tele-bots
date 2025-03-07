@@ -281,6 +281,27 @@ def update_user_history(user_id: Union[int, str], theme: str, message: str = "")
         save_user_history()
         logger.debug(f"Updated history for user: {user_id}")
 
+def run_db_operation_threadsafe(operation: Callable, *args, **kwargs):
+    """
+    Execute a database operation in a thread-safe manner.
+    This function ensures that database operations that may be called from different threads
+    are properly synchronized to prevent race conditions.
+    
+    Args:
+        operation: The database function to execute
+        *args: Positional arguments to pass to the operation
+        **kwargs: Keyword arguments to pass to the operation
+        
+    Returns:
+        The result of the operation
+    """
+    with file_lock:
+        try:
+            return operation(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error in thread-safe DB operation {operation.__name__}: {e}")
+            return None
+
 # Register signal handlers
 signal.signal(signal.SIGINT, _handle_exit)
 signal.signal(signal.SIGTERM, _handle_exit)
