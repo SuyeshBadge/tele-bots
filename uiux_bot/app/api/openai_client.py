@@ -14,6 +14,7 @@ import os
 import ast
 
 from openai import AsyncOpenAI
+import httpx
 
 from app.config import settings
 
@@ -36,8 +37,17 @@ openai_logger.addHandler(openai_handler)
 if not settings.DETAILED_OPENAI_LOGGING:
     openai_logger.setLevel(logging.WARNING)  # Only log warnings and errors
 
-# Initialize OpenAI client
-client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+# Create httpx client with proper SSL verification settings first
+http_client = httpx.AsyncClient(
+    verify=not settings.DISABLE_SSL_VERIFICATION,
+    timeout=httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=30.0)
+)
+
+# Initialize OpenAI client with the custom httpx client
+client = AsyncOpenAI(
+    api_key=settings.OPENAI_API_KEY,
+    http_client=http_client
+)
 
 # Simple in-memory cache for lesson content
 # Structure: {theme: (timestamp, content)}

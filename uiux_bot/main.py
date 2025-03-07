@@ -10,83 +10,87 @@ It also includes quizzes to engage users and can generate custom images for less
 Run with --dev flag to enable development mode with hot reload.
 """
 
+import sys
+print("Python version:", sys.version)
+print("Loading main modules...")
+
+import os
 import asyncio
 import logging
-import sys
-import nest_asyncio
-import signal
-import argparse
+
+print("Setting up paths...")
+# Add parent directory to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.utils.logger import setup_logging
+from app.config import settings
+
+# Configure logging
+setup_logging()
+logger = logging.getLogger(__name__)
+
+# Apply patches to fix compatibility issues
+print("Applying compatibility patches...")
+from app.utils.telegram_utils import apply_telegram_patches
+apply_telegram_patches()
+
+print("Importing bot module...")
 from app.bot.bot import UIUXLessonBot
 
+print("Starting bot...")
 
-def parse_args():
-    """Parse command line arguments"""
-    parser = argparse.ArgumentParser(description="UI/UX Lesson Bot")
-    parser.add_argument("--dev", action="store_true", help="Run in development mode with hot reload")
-    return parser.parse_args()
-
+async def async_main():
+    """Async main entry point for the bot"""
+    try:
+        # Initialize and start the bot
+        bot = UIUXLessonBot()
+        # Start the scheduler in the current event loop
+        bot.scheduler.start()
+        # Run the application with polling
+        await bot.application.initialize()
+        await bot.application.start()
+        
+        # Start polling (only once)
+        await bot.application.updater.start_polling(
+            poll_interval=0.5,
+            timeout=10,
+            bootstrap_retries=5,
+            read_timeout=7,
+            write_timeout=5,
+            drop_pending_updates=True
+        )
+        
+        # Keep the bot running
+        try:
+            # Run forever until stopped
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            # Proper cleanup
+            try:
+                await bot.application.stop()
+                await bot.application.shutdown()
+            except RuntimeError as e:
+                logger.warning(f"Error during shutdown: {e}")
+    except Exception as e:
+        # Log any other exceptions
+        logger.critical(f"Unexpected error: {e}", exc_info=True)
+        sys.exit(1)
 
 def main():
-    """Main function to run the bot"""
-    # Parse arguments
-    args = parse_args()
-    
-    # If in development mode, use hot reload
-    if args.dev:
-        try:
-            from hot_reload import start_hot_reload
-            print("Starting in development mode with hot reload...")
-            start_hot_reload()
-            return  # hot_reload will handle the application lifecycle
-        except ImportError:
-            print("Hot reload requires the watchdog package. Install with: pip install watchdog")
-            print("Continuing in normal mode...")
-    
-    # Setup logging
-    logger = setup_logging()
-    
-    # Apply nest_asyncio to allow nested event loops
-    nest_asyncio.apply()
-    
-    # Initialize a new event loop
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    # Set up signal handlers for graceful shutdown
-    bot = None
-    
-    def signal_handler(sig, frame):
-        logger.info(f"Received signal {sig}, shutting down...")
-        if bot:
-            bot.shutdown()
-        if loop.is_running():
-            loop.stop()
-        logger.info("Shutdown complete")
-        sys.exit(0)
-    
-    # Register signal handlers
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(sig, signal_handler)
-    
+    """Main entry point for the bot"""
     try:
-        # Create and start the bot
-        logger.info("Initializing UI/UX Lesson Bot")
-        bot = UIUXLessonBot()
-        bot.start()
-    except ValueError as e:
-        logger.critical(f"Configuration error: {e}")
-        sys.exit(1)
+        # Run the async main function
+        asyncio.run(async_main())
+    except KeyboardInterrupt:
+        # Handle clean shutdown on keyboard interrupt
+        print("KeyboardInterrupt detected. Shutting down...")
+        sys.exit(0)
     except Exception as e:
-        logger.critical(f"Unexpected error: {e}")
+        # Log any other exceptions
+        logger.critical(f"Unexpected error: {e}", exc_info=True)
         sys.exit(1)
-    finally:
-        # Clean up resources
-        if loop.is_running():
-            loop.stop()
-        loop.close()
-
 
 if __name__ == "__main__":
     main() 

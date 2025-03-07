@@ -107,6 +107,7 @@ uiux_bot/
 - **Admin Commands**: Special commands for bot administrators
 - **Health Monitoring**: Built-in health checks and status reporting
 - **Persistent Storage**: All subscriber data and images stored persistently
+- **Supabase Integration**: Supports cloud-based data storage
 
 ## Development Mode
 
@@ -151,6 +152,102 @@ pip install watchdog
 
 This dependency is included in the requirements.txt file.
 
+## Setup
+
+1. Clone the repository
+2. Install dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+3. Create a `.env` file with the following variables:
+   ```
+   TELEGRAM_BOT_TOKEN=your_bot_token
+   OPENAI_API_KEY=your_openai_api_key
+   OPENAI_MODEL=gpt-3.5-turbo
+   ADMIN_USER_IDS=123456789,987654321
+   ENABLE_ADMIN_COMMANDS=True
+   AUTO_ADMIN_SUBSCRIBERS=True
+   TIMEZONE=Asia/Kolkata
+   UNSPLASH_API_KEY=your_unsplash_api_key (optional)
+   CHANNEL_ID=your_channel_id (optional, for channel mode)
+   ENABLE_SUPABASE=True (optional, for Supabase integration)
+   SUPABASE_URL=your_supabase_url (required if ENABLE_SUPABASE=True)
+   SUPABASE_KEY=your_supabase_key (required if ENABLE_SUPABASE=True)
+   ```
+4. Run the bot:
+   ```
+   python main.py
+   ```
+   
+## Supabase Integration
+
+The bot supports Supabase integration for cloud-based data storage. This allows for:
+
+- Storing subscriber information
+- Tracking user history and preferences
+- Monitoring bot health status
+- Caching lesson content
+
+### Setting Up Supabase
+
+1. Create a Supabase account and project at [supabase.com](https://supabase.com)
+2. Get your Supabase URL and API key from the project settings
+3. Set the following environment variables in your `.env` file:
+   ```
+   ENABLE_SUPABASE=True
+   SUPABASE_URL=your_supabase_url
+   SUPABASE_KEY=your_supabase_key
+   ```
+4. Create the required tables in Supabase by running the SQL script in `database/simple_schema.sql`
+
+### Thread-Safe Implementation
+
+The Supabase integration is implemented in a thread-safe manner to avoid event loop conflicts. This is achieved through:
+
+1. **Thread-Safe Client**: The Supabase client is initialized with a thread lock to prevent multiple threads from initializing it simultaneously.
+2. **Decorator Pattern**: A `threadsafe_supabase_operation` decorator is used to make all Supabase operations thread-safe.
+3. **Fallback Mechanism**: If a Supabase operation fails, the system gracefully falls back to file-based storage.
+4. **Error Handling**: Comprehensive error handling and logging are implemented to track and diagnose issues.
+
+### Testing Supabase Integration
+
+You can test the Supabase integration by running:
+```
+python test_supabase.py
+```
+
+This script tests all Supabase operations, including:
+- Subscriber management
+- User history tracking
+- Health status monitoring
+- Lesson caching
+- Thread safety
+
+## Commands
+
+- `/start` - Subscribe to lessons
+- `/stop` - Unsubscribe from lessons
+- `/help` - Show help message
+- `/nextlesson` - Request an immediate lesson
+- `/health` - Check bot health status
+
+### Admin Commands
+
+- `/broadcast` - Broadcast a message to all subscribers
+- `/stats` - Show bot statistics
+- `/subscribers` - Show subscriber count
+- `/theme` - Request a lesson on a specific theme
+
+## Architecture
+
+The bot is built with a modular architecture:
+
+- `app/bot/` - Bot handlers and scheduler
+- `app/api/` - OpenAI and Unsplash API clients
+- `app/utils/` - Utility functions for persistence, database, etc.
+- `app/config/` - Configuration settings
+- `database/` - Database scripts and utilities
+
 ## License
 
-MIT License 
+This project is licensed under the MIT License - see the LICENSE file for details. 

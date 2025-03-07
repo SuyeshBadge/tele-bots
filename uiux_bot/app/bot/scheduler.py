@@ -1,137 +1,133 @@
 """
-Scheduler for sending UI/UX lessons at specified times.
+Scheduler for sending lessons at specific times.
 """
 
 import logging
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
+import asyncio
+import time
 from datetime import datetime, timedelta
+from typing import Dict, Any, List, Callable, Coroutine, Optional
 
 from app.config import settings
 from app.utils import persistence
-from app.bot.handlers import send_lesson
 
 # Configure logger
 logger = logging.getLogger(__name__)
 
-
-class LessonScheduler:
-    """Scheduler for UI/UX lessons"""
+class Scheduler:
+    """Scheduler for sending lessons at specific times."""
     
-    def __init__(self, bot):
-        """Initialize the scheduler with the bot instance"""
-        self.bot = bot
-        self.scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
+    def __init__(self, send_lesson_func: Callable[[List[int], str], Coroutine[Any, Any, None]]):
+        """
+        Initialize the scheduler.
+        
+        Args:
+            send_lesson_func: Function to call to send a lesson
+        """
+        self.send_lesson_func = send_lesson_func
+        self.running = False
+        self.task: Optional[asyncio.Task] = None
+        
+        # Schedule configuration
+        self.schedule = [
+            {"hour": 10, "minute": 0},  # 10:00 AM
+            {"hour": 18, "minute": 0}   # 6:00 PM
+        ]
+        
+        # Themes to cycle through
+        self.themes = [
+            "color theory",
+            "typography",
+            "layout principles",
+            "user research",
+            "wireframing",
+            "prototyping",
+            "usability testing",
+            "accessibility",
+            "responsive design",
+            "mobile design patterns",
+            "design systems",
+            "information architecture",
+            "visual hierarchy",
+            "interaction design",
+            "user personas",
+            "user journey mapping",
+            "microinteractions",
+            "animation principles",
+            "dark mode design",
+            "design ethics"
+        ]
+        
+        # Index to keep track of which theme to use next
+        self.theme_index = 0
+        
+        # Health check interval (5 minutes)
+        self.health_check_interval = 5 * 60
+        
+        # Last health check time
+        self.last_health_check = time.time()
+        
+        # Set up health check function
+        self.health_check_func = lambda: persistence.update_health_status()
     
-    def schedule_jobs(self):
-        """Schedule regular lesson jobs"""
-        # Fixed time scheduling for both development and production modes
-        # Morning lesson at 10:00 IST
-        self.scheduler.add_job(
-            self.send_scheduled_lesson,
-            CronTrigger(hour=10, minute=0, timezone=settings.TIMEZONE),
-            id="morning_lesson",
-            replace_existing=True,
-            misfire_grace_time=600,  # 10 minutes grace time for misfires
-        )
+    async def _scheduler_loop(self):
+        """Main scheduler loop."""
+        logger.info("Scheduler started")
         
-        # Evening lesson at 18:00 IST
-        self.scheduler.add_job(
-            self.send_scheduled_lesson,
-            CronTrigger(hour=18, minute=0, timezone=settings.TIMEZONE),
-            id="evening_lesson",
-            replace_existing=True,
-            misfire_grace_time=600,  # 10 minutes grace time for misfires
-        )
-        
-        if settings.IS_DEV_MODE:
-            logger.info("Development mode: Scheduled lessons at fixed times (10:00 AM and 6:00 PM IST)")
-        else:
-            logger.info("Production mode: Scheduled lessons at fixed times (10:00 AM and 6:00 PM IST)")
-        
-        # Add job to periodically save subscribers
-        self.scheduler.add_job(
-            persistence.save_subscribers,
-            CronTrigger(minute='*/30', timezone=settings.TIMEZONE),  # Every 30 minutes
-            id="save_subscribers",
-            replace_existing=True,
-        )
-        
-        # Add job to update health status
-        self.scheduler.add_job(
-            lambda: persistence.update_health_status(),
-            CronTrigger(minute='*/5', timezone=settings.TIMEZONE),  # Every 5 minutes
-            id="update_health",
-            replace_existing=True,
-        )
-    
-    async def send_scheduled_lesson(self):
-        """Send scheduled lesson to all subscribers or channel"""
-        logger.info("Sending scheduled lesson")
-        
-        # Get current hour to verify we're running at the correct time
-        current_hour = datetime.now(settings.TIMEZONE).hour
-        
-        # Only allow sending at the scheduled hours (10 AM and 6 PM)
-        if current_hour not in [10, 18] and not settings.IS_DEV_MODE:
-            logger.warning(f"Attempted to send scheduled lesson outside designated hours (current hour: {current_hour})")
-            return
-            
-        lesson_success = False
-        
-        try:
-            if settings.CHANNEL_ID:
-                # Channel mode: send to channel instead of individual subscribers
-                try:
-                    await send_lesson(channel_id=settings.CHANNEL_ID, bot=self.bot)
-                    logger.info(f"Scheduled lesson sent to channel {settings.CHANNEL_ID}")
-                    lesson_success = True
-                except Exception as e:
-                    logger.error(f"Error sending scheduled lesson to channel: {e}")
-                    persistence.update_health_status(error=True)
-            else:
-                # Subscription mode: send to all subscribers
-                failed_subscribers = []
-                success_count = 0
+        while self.running:
+            try:
+                # Get current time
+                now = datetime.now()
                 
-                for user_id in persistence.get_subscribers():
-                    try:
-                        await send_lesson(user_id=user_id, bot=self.bot)
-                        success_count += 1
-                    except Exception as e:
-                        logger.error(f"Failed to send lesson to {user_id}: {e}")
-                        failed_subscribers.append(user_id)
+                # Check if it's time to send a lesson
+                for schedule in self.schedule:
+                    if now.hour == schedule["hour"] and now.minute == schedule["minute"]:
+                        # Get subscribers
+                        subscribers = persistence.get_subscribers()
+                        
+                        if subscribers:
+                            # Get next theme
+                            theme = self.themes[self.theme_index]
+                            self.theme_index = (self.theme_index + 1) % len(self.themes)
+                            
+                            # Send lesson
+                            logger.info(f"Sending scheduled lesson on '{theme}' to {len(subscribers)} subscribers")
+                            await self.send_lesson_func(subscribers, theme)
+                            
+                            # Sleep to avoid sending multiple lessons in the same minute
+                            await asyncio.sleep(60)
                 
-                logger.info(f"Scheduled lesson sent to {success_count}/{len(persistence.get_subscribers())} subscribers")
+                # Health check
+                if time.time() - self.last_health_check > self.health_check_interval:
+                    self.health_check_func()
+                    self.last_health_check = time.time()
                 
-                # Remove failed subscribers if they're no longer valid
-                for user_id in failed_subscribers:
-                    try:
-                        # Check if user is still valid
-                        await self.bot.get_chat(user_id)
-                    except Exception:
-                        persistence.remove_subscriber(user_id)
-                        logger.info(f"Removed invalid subscriber: {user_id}")
-                
-                if success_count > 0:
-                    lesson_success = True
-            
-            if lesson_success:
-                persistence.update_health_status(lesson_sent=True)
-                
-        except Exception as e:
-            logger.error(f"Unexpected error in scheduled lesson delivery: {e}")
-            persistence.update_health_status(error=True)
-            
-        persistence.update_health_status()
+                # Sleep for 30 seconds before checking again
+                await asyncio.sleep(30)
+            except Exception as e:
+                logger.error(f"Error in scheduler loop: {e}")
+                await asyncio.sleep(60)  # Sleep for a minute before trying again
     
     def start(self):
-        """Start the scheduler"""
-        self.scheduler.start()
-        logger.info("Scheduler started")
+        """Start the scheduler."""
+        if not self.running:
+            self.running = True
+            # Get the current event loop or create a new one if needed
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                # No running event loop, create a new one
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # Create the task in the current event loop
+            self.task = loop.create_task(self._scheduler_loop())
+            logger.info("Scheduler task created")
     
-    def shutdown(self):
-        """Shutdown the scheduler"""
-        if self.scheduler.running:
-            self.scheduler.shutdown()
-            logger.info("Scheduler shutdown") 
+    def stop(self):
+        """Stop the scheduler."""
+        if self.running:
+            self.running = False
+            if self.task:
+                self.task.cancel()
+            logger.info("Scheduler stopped") 

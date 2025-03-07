@@ -18,6 +18,7 @@ from pathlib import Path
 
 import aiohttp
 from openai import AsyncOpenAI
+import httpx
 
 from app.config import settings
 from app.api import unsplash_client
@@ -25,8 +26,18 @@ from app.api import unsplash_client
 # Configure logger
 logger = logging.getLogger(__name__)
 
-# Initialize OpenAI client
-openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+# Initialize OpenAI client with proper configuration
+# Create httpx client with proper SSL verification settings first
+http_client = httpx.AsyncClient(
+    verify=not settings.DISABLE_SSL_VERIFICATION,
+    timeout=httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=30.0)
+)
+
+# Initialize OpenAI client with the custom httpx client
+openai_client = AsyncOpenAI(
+    api_key=settings.OPENAI_API_KEY,
+    http_client=http_client
+)
 
 class ImageStrategy:
     """Base class for image retrieval strategies"""

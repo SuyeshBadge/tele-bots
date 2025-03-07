@@ -31,6 +31,8 @@ CHANNEL_ID = os.getenv("CHANNEL_ID")  # Optional: For channel posting mode
 ADMIN_USER_IDS = [int(id) for id in os.getenv("ADMIN_USER_IDS", "").split(",") if id]
 # Flag to auto-add subscribers as admins (for development purposes)
 AUTO_ADMIN_SUBSCRIBERS = os.getenv("AUTO_ADMIN_SUBSCRIBERS", "False").lower() in ("true", "1", "yes")
+# Flag to enable admin commands
+ENABLE_ADMIN_COMMANDS = os.getenv("ENABLE_ADMIN_COMMANDS", "True").lower() in ("true", "1", "yes")
 
 # OpenAI configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -48,6 +50,11 @@ MAX_DAILY_LESSONS = os.getenv("MAX_DAILY_LESSONS", "5")  # Maximum on-demand les
 
 # Unsplash configuration
 UNSPLASH_API_KEY = os.getenv("UNSPLASH_API_KEY", "")  # For Unsplash images
+
+# Supabase configuration
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
+ENABLE_SUPABASE = os.getenv("ENABLE_SUPABASE", "False").lower() in ("true", "1", "yes")
 
 # API request settings
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "15"))  # 15 seconds timeout instead of 30

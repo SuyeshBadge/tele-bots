@@ -1,5 +1,7 @@
 """
 Utility functions for data persistence (subscribers, health status).
+This module provides file-based persistence by default, but defers to
+the database module when Supabase is enabled.
 """
 
 import os
@@ -7,8 +9,10 @@ import json
 import time
 import logging
 import asyncio
+import signal
+import threading
 import sys
-from typing import Set, Dict, Any, List
+from typing import Set, Dict, Any, List, Union, Optional, Callable
 
 from app.config import settings
 
@@ -26,177 +30,262 @@ health_status = {
 }
 
 # File paths
-USER_HISTORY_FILE = os.path.join(settings.DATA_DIR, "user_history.json")
+DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data')
+SUBSCRIBERS_FILE = os.path.join(DATA_DIR, 'subscribers.json')
+USER_HISTORY_FILE = os.path.join(DATA_DIR, 'user_history.json')
+HEALTH_FILE = os.path.join(DATA_DIR, 'health.json')
 
+# Ensure data directory exists
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# Lock for thread-safe file operations
+file_lock = threading.RLock()
+
+def _handle_exit(signum, frame):
+    """Save data on exit"""
+    logger.info("Saving data before exit...")
+    save_subscribers()
+    save_user_history()
+    save_health_status()
+    sys.exit(0)
+
+# ----------------- File-based persistence functions -----------------
 
 def load_subscribers() -> Set[int]:
     """Load subscribers from file"""
     global subscribers
-    try:
-        if os.path.exists(settings.SUBSCRIBERS_FILE):
-            with open(settings.SUBSCRIBERS_FILE, "r") as f:
-                subscribers = set(json.load(f))
-                logger.info(f"Loaded {len(subscribers)} subscribers")
-    except Exception as e:
-        logger.error(f"Error loading subscribers: {e}")
-        # Initialize empty set if loading fails
-        subscribers = set()
     
-    # Also load user history
-    load_user_history()
+    with file_lock:
+        if os.path.exists(SUBSCRIBERS_FILE):
+            try:
+                with open(SUBSCRIBERS_FILE, 'r') as f:
+                    data = json.load(f)
+                    subscribers = set(data)
+                    logger.info(f"Loaded {len(subscribers)} subscribers")
+            except Exception as e:
+                logger.error(f"Failed to load subscribers: {e}")
     
     return subscribers
 
-
-def save_subscribers() -> bool:
+def save_subscribers() -> None:
     """Save subscribers to file"""
-    try:
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(settings.SUBSCRIBERS_FILE), exist_ok=True)
-        with open(settings.SUBSCRIBERS_FILE, "w") as f:
-            json.dump(list(subscribers), f)
-        logger.info(f"Saved {len(subscribers)} subscribers")
-        return True
-    except Exception as e:
-        logger.error(f"Error saving subscribers: {e}")
-        return False
+    with file_lock:
+        try:
+            with open(SUBSCRIBERS_FILE, 'w') as f:
+                json.dump(list(subscribers), f)
+                logger.debug(f"Saved {len(subscribers)} subscribers")
+        except Exception as e:
+            logger.error(f"Failed to save subscribers: {e}")
 
-
-def add_subscriber(user_id: int) -> bool:
-    """Add a subscriber and save to file"""
+def add_subscriber(user_id: int) -> None:
+    """Add a subscriber"""
     global subscribers
-    if user_id not in subscribers:
+    
+    with file_lock:
         subscribers.add(user_id)
-        return save_subscribers()
-    return True
+        save_subscribers()
+        logger.info(f"Added subscriber: {user_id}")
 
-
-def remove_subscriber(user_id: int) -> bool:
-    """Remove a subscriber and save to file"""
+def remove_subscriber(user_id: int) -> None:
+    """Remove a subscriber"""
     global subscribers
-    if user_id in subscribers:
-        subscribers.discard(user_id)
-        return save_subscribers()
-    return True
+    
+    with file_lock:
+        if user_id in subscribers:
+            subscribers.remove(user_id)
+            save_subscribers()
+            logger.info(f"Removed subscriber: {user_id}")
 
-
-def get_subscribers() -> Set[int]:
-    """Get the current set of subscribers"""
+def get_subscribers() -> List[int]:
+    """Get all subscribers"""
     global subscribers
-    return subscribers
+    
+    # If Supabase is enabled, try to get subscribers from there
+    if settings.ENABLE_SUPABASE:
+        try:
+            # Import here to avoid circular imports
+            from app.utils import database
+            db_subscribers = database.get_subscribers()
+            if db_subscribers is not None:
+                return db_subscribers
+        except Exception as e:
+            logger.error(f"Failed to get subscribers from database: {e}")
+    
+    # Fallback to file-based persistence
+    with file_lock:
+        if not subscribers:
+            load_subscribers()
+        return list(subscribers)
 
-
-def update_health_status(activity: bool = True, lesson_sent: bool = False, error: bool = False) -> Dict[str, Any]:
-    """Update and save health status"""
+def load_health_status() -> Dict[str, Any]:
+    """Load health status from file"""
     global health_status
     
-    if activity:
-        health_status["last_activity"] = int(time.time())
-    
-    if lesson_sent:
-        health_status["lessons_sent"] += 1
-    
-    if error:
-        health_status["errors"] += 1
-    
-    try:
-        with open(settings.HEALTH_FILE, "w") as f:
-            json.dump(health_status, f)
-    except Exception as e:
-        logger.error(f"Error saving health status: {e}")
+    with file_lock:
+        if os.path.exists(HEALTH_FILE):
+            try:
+                with open(HEALTH_FILE, 'r') as f:
+                    health_status = json.load(f)
+                    logger.debug("Loaded health status")
+            except Exception as e:
+                logger.error(f"Failed to load health status: {e}")
     
     return health_status
 
+def save_health_status() -> None:
+    """Save health status to file"""
+    with file_lock:
+        try:
+            with open(HEALTH_FILE, 'w') as f:
+                json.dump(health_status, f)
+                logger.debug("Saved health status")
+        except Exception as e:
+            logger.error(f"Failed to save health status: {e}")
+
+def update_health_status(error: bool = False, lesson_sent: bool = False) -> None:
+    """Update health status"""
+    global health_status
+    
+    # If Supabase is enabled, try to update health status there
+    if settings.ENABLE_SUPABASE:
+        try:
+            # Import here to avoid circular imports
+            from app.utils import database
+            result = database.update_health_status(error=error)
+            if lesson_sent:
+                database.increment_lessons_sent()
+            return
+        except Exception as e:
+            logger.error(f"Error updating health status via Supabase: {e}")
+    
+    # Fallback to file-based persistence
+    with file_lock:
+        health_status["last_activity"] = int(time.time())
+        
+        if error:
+            health_status["errors"] += 1
+            
+        if lesson_sent:
+            health_status["lessons_sent"] += 1
+            
+        save_health_status()
+        logger.debug("Updated health status")
 
 def get_health_status() -> Dict[str, Any]:
-    """Get the current health status"""
-    global health_status
-    return health_status
+    """Get health status"""
+    # If Supabase is enabled, try to get health status from there
+    if settings.ENABLE_SUPABASE:
+        try:
+            # Import here to avoid circular imports
+            from app.utils import database
+            db_health = database.get_health_status()
+            if db_health is not None:
+                return db_health
+        except Exception as e:
+            logger.error(f"Failed to get health status from database: {e}")
+    
+    # Fallback to file-based persistence
+    with file_lock:
+        if not health_status:
+            load_health_status()
+        return dict(health_status)
 
-
-def load_user_history() -> Dict[str, Any]:
-    """Load user message history from file"""
+def load_user_history() -> Dict[str, Dict[str, Any]]:
+    """Load user history from file"""
     global user_history
-    try:
+    
+    with file_lock:
         if os.path.exists(USER_HISTORY_FILE):
-            with open(USER_HISTORY_FILE, "r") as f:
-                user_history = json.load(f)
-                logger.info(f"Loaded history for {len(user_history)} users")
-    except Exception as e:
-        logger.error(f"Error loading user history: {e}")
-        # Initialize empty dict if loading fails
-        user_history = {}
+            try:
+                with open(USER_HISTORY_FILE, 'r') as f:
+                    user_history = json.load(f)
+                    logger.debug(f"Loaded history for {len(user_history)} users")
+            except Exception as e:
+                logger.error(f"Failed to load user history: {e}")
     
     return user_history
 
+def save_user_history() -> None:
+    """Save user history to file"""
+    with file_lock:
+        try:
+            with open(USER_HISTORY_FILE, 'w') as f:
+                json.dump(user_history, f)
+                logger.debug(f"Saved history for {len(user_history)} users")
+        except Exception as e:
+            logger.error(f"Failed to save user history: {e}")
 
-def save_user_history() -> bool:
-    """Save user message history to file"""
-    try:
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(USER_HISTORY_FILE), exist_ok=True)
-        with open(USER_HISTORY_FILE, "w") as f:
-            json.dump(user_history, f)
-        logger.info(f"Saved history for {len(user_history)} users")
-        return True
-    except Exception as e:
-        logger.error(f"Error saving user history: {e}")
-        return False
-
-
-def get_user_history(user_id: Any) -> Dict[str, Any]:
-    """Get message history for a specific user"""
-    global user_history
-    user_id_str = str(user_id)  # Convert to string for JSON compatibility
+def get_user_history(user_id: Union[int, str]) -> Dict[str, Any]:
+    """Get user history"""
+    # If Supabase is enabled, try to get user history from there
+    if settings.ENABLE_SUPABASE:
+        try:
+            # Import here to avoid circular imports
+            from app.utils import database
+            db_history = database.get_user_history(user_id)
+            if db_history is not None:
+                return db_history
+        except Exception as e:
+            logger.error(f"Failed to get user history from database: {e}")
     
-    if user_id_str not in user_history:
-        user_history[user_id_str] = {
-            "recent_themes": [],
-            "recent_messages": []
-        }
+    # Fallback to file-based persistence
+    user_id_str = str(user_id)
     
-    return user_history[user_id_str]
+    with file_lock:
+        if not user_history:
+            load_user_history()
+            
+        if user_id_str not in user_history:
+            user_history[user_id_str] = {"recent_themes": [], "recent_lessons": []}
+            
+        return dict(user_history[user_id_str])
 
+def update_user_history(user_id: Union[int, str], theme: str, message: str = "") -> None:
+    """Update user history with theme and message"""
+    # If Supabase is enabled, try to update user history there
+    if settings.ENABLE_SUPABASE:
+        try:
+            # Import here to avoid circular imports
+            from app.utils import database
+            result = database.update_user_history(user_id, theme, message)
+            if result:
+                return
+        except Exception as e:
+            logger.error(f"Failed to update user history in database: {e}")
+    
+    # Fallback to file-based persistence
+    user_id_str = str(user_id)
+    
+    with file_lock:
+        # Ensure user history is loaded
+        if not user_history:
+            load_user_history()
+            
+        # Initialize if not exists
+        if user_id_str not in user_history:
+            user_history[user_id_str] = {"recent_themes": [], "recent_lessons": []}
+            
+        # Update recent themes (keep only the last 10)
+        if theme in user_history[user_id_str]["recent_themes"]:
+            user_history[user_id_str]["recent_themes"].remove(theme)
+            
+        user_history[user_id_str]["recent_themes"].insert(0, theme)
+        user_history[user_id_str]["recent_themes"] = user_history[user_id_str]["recent_themes"][:10]
+        
+        # Update recent lessons (keep only the last 5)
+        if message:
+            user_history[user_id_str]["recent_lessons"].insert(0, message)
+            user_history[user_id_str]["recent_lessons"] = user_history[user_id_str]["recent_lessons"][:5]
+            
+        # Save to file
+        save_user_history()
+        logger.debug(f"Updated history for user: {user_id}")
 
-def update_user_history(user_id: Any, theme: str, message: str = None) -> bool:
-    """Update user history with new theme and message"""
-    global user_history
-    user_id_str = str(user_id)  # Convert to string for JSON compatibility
-    
-    user_data = get_user_history(user_id)
-    
-    # Update theme history (keep last 5 themes to avoid repetition)
-    MAX_THEMES = 5
-    if theme and theme not in user_data["recent_themes"]:
-        user_data["recent_themes"].append(theme)
-        if len(user_data["recent_themes"]) > MAX_THEMES:
-            user_data["recent_themes"].pop(0)  # Remove oldest theme
-    
-    # Update message history if provided
-    MAX_MESSAGES = 10
-    if message:
-        user_data["recent_messages"].append(message)
-        if len(user_data["recent_messages"]) > MAX_MESSAGES:
-            user_data["recent_messages"].pop(0)  # Remove oldest message
-    
-    # Save to file
-    user_history[user_id_str] = user_data
-    return save_user_history()
+# Register signal handlers
+signal.signal(signal.SIGINT, _handle_exit)
+signal.signal(signal.SIGTERM, _handle_exit)
 
-
-def _handle_exit(signum, frame):
-    """Handle exit signals gracefully"""
-    logger.info(f"Received signal {signum}, shutting down...")
-    # Save subscribers
-    save_subscribers()
-    # Save user history
-    save_user_history()
-    # Save health status
-    update_health_status()
-    # Stop the scheduler
-    if hasattr(self, 'scheduler'):
-        self.scheduler.shutdown()
-    # Stop the application
-    if hasattr(self, 'application'):
-        asyncio.run(self.application.stop())
-    sys.exit(0) 
+# Load data on module import
+load_subscribers()
+load_user_history()
+get_health_status()  # Load health status 

@@ -14,7 +14,7 @@ import os
 
 from telegram import Update, Poll, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, PollAnswer
 from telegram.constants import ParseMode
-from telegram.ext import CallbackContext, CommandHandler, PollAnswerHandler
+from telegram.ext import CallbackContext, CommandHandler, PollAnswerHandler, filters
 from telegram.error import BadRequest
 
 from app.config import settings
@@ -24,6 +24,11 @@ from app.utils import persistence
 
 # Configure logger
 logger = logging.getLogger(__name__)
+
+# Create admin filter for admin commands
+def admin_filter(update: Update):
+    """Filter for admin users only"""
+    return update.effective_user.id in settings.ADMIN_USER_IDS
 
 # Dictionary to store active quizzes and their correct answers
 # Structure: {poll_id: {'correct_option': index, 'explanation': text, 'theme': str, 'question': str, 'options': list}}
@@ -322,21 +327,21 @@ def get_last_lesson_time() -> str:
     return datetime.now(settings.TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
 
 
-async def error_handler(update: Update, context: CallbackContext):
-    """Log errors caused by updates"""
-    logger.error(f"Update {update} caused error: {context.error}")
+async def error_handler(update: Update, context: CallbackContext) -> None:
+    """Handle errors in the telegram bot."""
+    logger.error(f"Exception while handling an update: {context.error}")
+    
+    # Log the error
     persistence.update_health_status(error=True)
     
-    # If update is available and has effective message, notify user
+    # Send a message to the user
     if update and update.effective_message:
         await update.effective_message.reply_text(
             "Sorry, something went wrong. Please try again later."
         )
-    
-    persistence.update_health_status()
 
 
-async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
+async def send_lesson(user_id: int = None, channel_id: str = None, bot = None, theme: str = None):
     """Send a UI/UX lesson with optimized performance"""
     try:
         # Get bot instance if not provided
@@ -350,12 +355,14 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
         user_history = persistence.get_user_history(target_id)
         recent_themes = user_history.get("recent_themes", [])
         
-        # Select a theme that hasn't been used recently
-        available_themes = [theme for theme in settings.UI_UX_THEMES if theme not in recent_themes]
-        if not available_themes:  # If all themes have been used, reset
-            available_themes = settings.UI_UX_THEMES
-            
-        theme = random.choice(available_themes)
+        # If theme is provided, use it; otherwise select one that hasn't been used recently
+        if not theme:
+            # Select a theme that hasn't been used recently
+            available_themes = [theme for theme in settings.UI_UX_THEMES if theme not in recent_themes]
+            if not available_themes:  # If all themes have been used, reset
+                available_themes = settings.UI_UX_THEMES
+                
+            theme = random.choice(available_themes)
         
         # Generate lesson content
         lesson_data = await openai_client.generate_lesson_content(theme)
@@ -376,7 +383,7 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
         # Ensure lesson_data has all required fields
         required_fields = {
             'title': str,
-            'content': str,
+            'content': (str, list),  # Accept either string or list for content
             'quiz_question': str,
             'quiz_options': list,
             'correct_option_index': int,
@@ -386,21 +393,38 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
         for field, expected_type in required_fields.items():
             if field not in lesson_data:
                 logger.error(f"Missing required field in lesson data: {field}")
-                lesson_data[field] = "" if expected_type == str else ([] if expected_type == list else 0)
+                # Determine default value based on the expected type
+                if expected_type == str:
+                    lesson_data[field] = ""
+                elif expected_type == list:
+                    lesson_data[field] = []
+                elif expected_type == int:
+                    lesson_data[field] = 0
+                elif isinstance(expected_type, tuple):
+                    # For tuple types (like (str, list)), use the first type's default
+                    if str in expected_type:
+                        lesson_data[field] = ""
+                    elif list in expected_type:
+                        lesson_data[field] = []
+                    else:
+                        lesson_data[field] = None
             elif not isinstance(lesson_data[field], expected_type):
                 logger.error(f"Field {field} has wrong type. Expected {expected_type}, got {type(lesson_data[field])}")
-                if expected_type == str:
+                
+                # Handle conversion based on expected type
+                if expected_type == str or (isinstance(expected_type, tuple) and str in expected_type):
                     lesson_data[field] = str(lesson_data[field])
-                elif expected_type == list and isinstance(lesson_data[field], str):
+                elif expected_type == list or (isinstance(expected_type, tuple) and list in expected_type):
                     # Try to convert string to list if possible
-                    try:
-                        if lesson_data[field].startswith('[') and lesson_data[field].endswith(']'):
-                            import ast
-                            lesson_data[field] = ast.literal_eval(lesson_data[field])
-                        else:
-                            lesson_data[field] = [lesson_data[field]]
-                    except:
-                        lesson_data[field] = ["Option A", "Option B", "Option C", "Option D"]
+                    if isinstance(lesson_data[field], str):
+                        try:
+                            if lesson_data[field].startswith('[') and lesson_data[field].endswith(']'):
+                                import ast
+                                lesson_data[field] = ast.literal_eval(lesson_data[field])
+                            else:
+                                lesson_data[field] = [lesson_data[field]]
+                        except:
+                            lesson_data[field] = ["Option A", "Option B", "Option C", "Option D"]
                 elif expected_type == int:
                     try:
                         lesson_data[field] = int(lesson_data[field])
@@ -426,9 +450,20 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
             "title": lesson_data['title'],
             "theme": theme,
             "timestamp": int(time.time()),
-            "content_summary": lesson_data['content'][:100] + "...",  # Store just a summary
             "quiz_question": lesson_data['quiz_question']
         }
+        
+        # Handle content_summary based on type
+        if isinstance(lesson_data['content'], list) and lesson_data['content']:
+            # For list content, use the first item
+            content_sample = lesson_data['content'][0]
+            message_summary["content_summary"] = f"{content_sample[:100]}..." if len(content_sample) > 100 else content_sample
+        elif isinstance(lesson_data['content'], str):
+            # For string content, use the first 100 characters
+            message_summary["content_summary"] = f"{lesson_data['content'][:100]}..." if len(lesson_data['content']) > 100 else lesson_data['content']
+        else:
+            # Fallback for unexpected content type
+            message_summary["content_summary"] = "Lesson content available"
         
         # Also save image information if available
         if image_data and "url" in image_data:
@@ -442,7 +477,9 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
                 except Exception as e:
                     logger.error(f"Failed to save image locally: {e}")
                 
-        persistence.update_user_history(target_id, theme, json.dumps(message_summary))
+        # Use thread-safe persistence operation
+        from app.utils.persistence import run_db_operation_threadsafe
+        run_db_operation_threadsafe(persistence.update_user_history, target_id, theme, json.dumps(message_summary))
         
         # Ensure title is properly formatted - remove any asterisks
         clean_title = lesson_data['title'].replace('*', '')  # Remove any asterisks from title
@@ -1070,6 +1107,119 @@ async def on_poll_answer(update: Update, context: CallbackContext):
             logger.error(f"Failed to send even simple feedback: {inner_e}")
 
 
+async def subscribers_command(update: Update, context: CallbackContext):
+    """Admin command to show subscriber count and details"""
+    user_id = update.effective_user.id
+    
+    if user_id in settings.ADMIN_USER_IDS:
+        subscribers_list = persistence.get_subscribers()
+        
+        message = f"📊 *Subscribers Information*\n\n"
+        message += f"Total subscribers: {len(subscribers_list)}\n\n"
+        
+        # Add subscriber IDs - limit to avoid message size limits
+        if subscribers_list:
+            sub_ids = list(subscribers_list)[:20]  # Show first 20 only
+            message += f"Subscriber IDs:\n"
+            for idx, sub_id in enumerate(sub_ids, 1):
+                message += f"{idx}. `{sub_id}`\n"
+            
+            if len(subscribers_list) > 20:
+                message += f"\n...and {len(subscribers_list) - 20} more"
+        else:
+            message += "No subscribers yet."
+        
+        await update.message.reply_text(
+            message,
+            parse_mode=ParseMode.MARKDOWN
+        )
+    else:
+        await update.message.reply_text("This command is only available to admins.")
+    
+    persistence.update_health_status()
+
+
+async def theme_command(update: Update, context: CallbackContext):
+    """Admin command to view available themes or send a specific theme lesson"""
+    user_id = update.effective_user.id
+    
+    if user_id in settings.ADMIN_USER_IDS:
+        # If no arguments, show available themes
+        if not context.args:
+            # Group themes by category
+            themes_by_category = {}
+            current_category = "Uncategorized"
+            
+            for theme in settings.UI_UX_THEMES:
+                # Check if this is a category header (not starting with spaces)
+                if not theme.startswith(" "):
+                    current_category = theme
+                    themes_by_category[current_category] = []
+                else:
+                    # Add to current category
+                    if current_category in themes_by_category:
+                        themes_by_category[current_category].append(theme.strip())
+            
+            # Build message with categories
+            message = "📚 *Available UI/UX Themes*\n\n"
+            for category, themes in themes_by_category.items():
+                if themes:  # Only show categories with themes
+                    message += f"*{category}*\n"
+                    for i, theme in enumerate(themes, 1):
+                        message += f"{i}. {theme}\n"
+                    message += "\n"
+            
+            message += "\nUse `/theme [number]` or `/theme [theme name]` to send a specific theme lesson."
+            
+            await update.message.reply_text(
+                message,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            # Try to send a specific theme
+            theme_query = " ".join(context.args)
+            
+            # Check if it's a number
+            try:
+                theme_index = int(theme_query) - 1
+                if 0 <= theme_index < len(settings.UI_UX_THEMES):
+                    theme = settings.UI_UX_THEMES[theme_index]
+                    await update.message.reply_text(f"Generating lesson on: *{theme}*", parse_mode=ParseMode.MARKDOWN)
+                    
+                    # Get chat ID (could be user or channel)
+                    chat_id = update.effective_chat.id
+                    
+                    # Send the lesson
+                    await send_lesson(user_id=chat_id, theme=theme, bot=context.bot)
+                else:
+                    await update.message.reply_text(f"Invalid theme number. Please use a number between 1 and {len(settings.UI_UX_THEMES)}.")
+            except ValueError:
+                # Not a number, try to find by name
+                matching_themes = [t for t in settings.UI_UX_THEMES if theme_query.lower() in t.lower()]
+                
+                if len(matching_themes) == 1:
+                    theme = matching_themes[0]
+                    await update.message.reply_text(f"Generating lesson on: *{theme}*", parse_mode=ParseMode.MARKDOWN)
+                    
+                    # Get chat ID (could be user or channel)
+                    chat_id = update.effective_chat.id
+                    
+                    # Send the lesson
+                    await send_lesson(user_id=chat_id, theme=theme, bot=context.bot)
+                elif len(matching_themes) > 1:
+                    message = "Multiple matching themes found:\n\n"
+                    for i, theme in enumerate(matching_themes, 1):
+                        message += f"{i}. {theme}\n"
+                    message += "\nPlease be more specific."
+                    await update.message.reply_text(message)
+                else:
+                    await update.message.reply_text("No matching theme found. Use /theme to see all available themes.")
+    else:
+        await update.message.reply_text("This command is only available to admins.")
+    
+    persistence.update_health_status()
+
+
 def setup_handlers(application):
     """Setup message handlers for the bot"""
     # Command handlers
@@ -1086,6 +1236,8 @@ def setup_handlers(application):
     # Admin commands
     application.add_handler(CommandHandler("stats", stats_command))
     application.add_handler(CommandHandler("broadcast", broadcast_command))
+    application.add_handler(CommandHandler("subscribers", subscribers_command))
+    application.add_handler(CommandHandler("theme", theme_command))
     
     # Register error handler
     application.add_error_handler(error_handler) 
