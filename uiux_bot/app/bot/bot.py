@@ -7,11 +7,13 @@ import signal
 import sys
 import asyncio
 
+from telegram.constants import ParseMode
 from telegram.ext import (
     Application,
     CommandHandler,
     CallbackContext,
     PollAnswerHandler,
+    Defaults,
 )
 
 from app.config import settings
@@ -32,19 +34,36 @@ class UIUXLessonBot:
         # Validate required environment variables
         settings.validate_settings()
         
-        # Initialize bot components
-        self.application = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).build()
+        # Performance optimization: Configure application with optimized settings
+        app_config = {
+            "connection_pool_size": 8,  # Increase connection pool for better parallelism
+            "connect_timeout": 10.0,    # Shorter connect timeout
+            "read_timeout": 10.0,       # Shorter read timeout
+            "write_timeout": 10.0,      # Shorter write timeout
+            "pool_timeout": 1.0,        # Shorter pool timeout
+        }
+        
+        # Initialize bot components with optimized settings
+        self.application = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).defaults(defaults=Defaults(
+            parse_mode=ParseMode.HTML,  # Default parse mode to HTML
+            disable_notification=False,
+            disable_web_page_preview=True,  # Disable web previews for faster messages
+            allow_sending_without_reply=True,
+            block=False  # Non-blocking by default
+        )).concurrent_updates(8).application_class(Application).build()  # Enable concurrent updates
+
         self.bot = self.application.bot
         
-        # Initialize scheduler
+        # Initialize scheduler with optimized settings
         self.scheduler = scheduler.LessonScheduler(self.bot)
         
-        # Setup handlers and initial data
+        # Setup handlers and initial data - load data more efficiently
         self.setup_handlers()
         persistence.load_subscribers()
         
-        # Initialize image sources
-        unsplash_client.ensure_fallback_images()
+        # Initialize image sources in the background if needed
+        if settings.UNSPLASH_API_KEY:
+            unsplash_client.ensure_fallback_images()
         
         # Log available image sources
         self._log_image_sources()
@@ -138,7 +157,7 @@ class UIUXLessonBot:
             logger.info("Bot shutdown complete")
 
     def start(self):
-        """Start the bot and scheduler"""
+        """Start the bot and scheduler with optimized settings"""
         try:
             # Log startup
             logger.info(f"Starting UI/UX Lesson Bot with OpenAI model: {settings.OPENAI_MODEL}")
@@ -158,8 +177,15 @@ class UIUXLessonBot:
             # Schedule the jobs
             self.scheduler.schedule_jobs()
             
-            # Start the bot
-            self.application.run_polling()
+            # Start the bot with optimized polling
+            self.application.run_polling(
+                poll_interval=0.5,       # Faster polling interval
+                timeout=10,              # Shorter timeout
+                bootstrap_retries=5,     # Fewer bootstrap retries
+                read_timeout=7,          # Shorter read timeout
+                write_timeout=5,         # Shorter write timeout
+                drop_pending_updates=True  # Start fresh on startup for better performance
+            )
             logger.info("Bot started and polling for updates")
             
         except Exception as e:

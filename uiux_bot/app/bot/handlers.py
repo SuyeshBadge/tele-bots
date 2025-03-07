@@ -31,44 +31,21 @@ active_quizzes: Dict[str, Dict[str, Union[int, str, list]]] = {}
 
 def sanitize_html_for_telegram(text: str) -> str:
     """
-    Simple HTML sanitization for Telegram messages.
-    Telegram supports limited HTML tags: <b>, <i>, <code>, <pre>, <a>.
+    Simplified HTML sanitization for Telegram messages.
+    Only handles essential formatting to improve performance.
     """
     if not text:
         return ""
-        
-    # Convert markdown-style to HTML with simple replacements
-    # Process bold first (avoids issues with nested formatting)
-    text = text.replace("**", "<b>", 1)
-    while "**" in text:
-        text = text.replace("**", "</b>", 1)
-        if "**" in text:
-            text = text.replace("**", "<b>", 1)
     
-    # Process italics after bold
-    text = text.replace("*", "<i>", 1)
-    while "*" in text:
-        text = text.replace("*", "</i>", 1)
-        if "*" in text:
-            text = text.replace("*", "<i>", 1)
+    # Simple replacements for most common formatting
+    text = text.replace("**", "<b>").replace("**", "</b>")
+    text = text.replace("*", "<i>").replace("*", "</i>")
     
-    # Preserve and enhance paragraph formatting
-    
-    # First, convert all HTML breaks to consistent newlines
+    # Standardize newlines
     text = text.replace("<br>", "\n").replace("<br/>", "\n").replace("<br />", "\n")
     
-    # Ensure paragraphs have at least double newlines between them
-    # Replace single newlines only if they're not already part of a paragraph break
-    text = re.sub(r'(?<!\n)\n(?!\n)', '\n\n', text)
-    
-    # Make paragraph breaks consistently double newlines (not more)
+    # Ensure paragraph spacing with simple regex
     text = re.sub(r'\n{3,}', '\n\n', text)
-    
-    # Add spacing after bullet points for better readability
-    text = re.sub(r'(•|·|\*|\\-|-)(\s*)', r'\1 ', text)
-    
-    # Make sure each paragraph starts with proper indentation for readability
-    text = re.sub(r'\n\n([^•\*\-<])', r'\n\n\1', text)
     
     return text
 
@@ -360,7 +337,7 @@ async def error_handler(update: Update, context: CallbackContext):
 
 
 async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
-    """Send a UI/UX design lesson."""
+    """Send a UI/UX lesson with optimized performance"""
     try:
         # Get bot instance if not provided
         if not bot:
@@ -382,6 +359,19 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
         
         # Generate lesson content
         lesson_data = await openai_client.generate_lesson_content(theme)
+        
+        # Log the raw content format immediately after getting it
+        content_type = type(lesson_data['content'])
+        logger.info(f"Raw content type from OpenAI: {content_type}")
+        if isinstance(lesson_data['content'], list):
+            logger.info(f"Content is a list with {len(lesson_data['content'])} items")
+        elif isinstance(lesson_data['content'], str):
+            if lesson_data['content'].startswith('[') and lesson_data['content'].endswith(']'):
+                logger.info("Content is a string that looks like an array representation")
+            else:
+                logger.info("Content is a regular string")
+        else:
+            logger.info(f"Content is an unexpected type: {content_type}")
         
         # Ensure lesson_data has all required fields
         required_fields = {
@@ -454,12 +444,48 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
                 
         persistence.update_user_history(target_id, theme, json.dumps(message_summary))
         
-        # Ensure content is properly formatted using our sanitize function
+        # Ensure title is properly formatted - remove any asterisks
         clean_title = lesson_data['title'].replace('*', '')  # Remove any asterisks from title
+        
+        # Handle content that could be either a string or an array of bullet points
+        content = lesson_data['content']
+        
+        # If content is provided as an array (bullet points), convert to string
+        if isinstance(content, list):
+            # Add an empty line after the title before the first bullet point
+            joined_content = ""
+            for i, bullet in enumerate(content):
+                if i > 0:
+                    # Add spacing between bullets
+                    joined_content += "\n\n"
+                joined_content += bullet
+            content = joined_content
+            logger.info(f"Converted content array with {len(lesson_data['content'])} bullet points to properly formatted string")
+        # If content is a string but looks like a Python array representation (starts with '[' and ends with ']')
+        elif isinstance(content, str) and content.startswith('[') and content.endswith(']'):
+            try:
+                # Try to parse it as a literal array
+                import ast
+                content_array = ast.literal_eval(content)
+                if isinstance(content_array, list):
+                    # Add an empty line after the title before the first bullet point
+                    joined_content = ""
+                    for i, bullet in enumerate(content_array):
+                        if i > 0:
+                            # Add spacing between bullets
+                            joined_content += "\n\n"
+                        joined_content += bullet
+                    content = joined_content
+                    logger.info(f"Parsed string representation of array into {len(content_array)} properly formatted bullet points")
+            except Exception as e:
+                logger.error(f"Failed to parse content as array: {e}")
+                # If parsing fails, remove the brackets to at least make it look better
+                content = content[1:-1].replace("', '", "\n\n").replace("'", "")
+                logger.info("Removed array formatting characters")
         
         # Sanitize content using our helper function
         # Make sure we have proper newlines in the content
-        content = sanitize_html_for_telegram(lesson_data['content'])
+        content = sanitize_html_for_telegram(content)
         
         # Log the content length for debugging
         logger.info(f"Lesson content length: {len(content)} characters")
@@ -637,37 +663,30 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
         
         # Send the quiz
         quiz_question = lesson_data['quiz_question']
-        # Strip HTML tags - Telegram poll API doesn't support HTML formatting
-        quiz_question = re.sub(r'<[^>]*>', '', quiz_question)
-        # Clean up any markdown formatting
+        # Clean quiz question - simpler regex for better performance
+        quiz_question = quiz_question.replace("<br>", " ").replace("\n", " ")
+        quiz_question = re.sub(r'<[^>]*>', '', quiz_question)  # Simple tag removal
         quiz_question = quiz_question.replace('**', '').replace('*', '')
         
-        # Format without HTML tags since polls don't support HTML
-        question = f"🧠 TEST YOUR KNOWLEDGE: 🧠\n\n{quiz_question}"
-        
+        # Format question (shorter version)
+        question = f"🧠 QUIZ: {quiz_question}"
         if len(question) > 300:
-            # Truncate the question, but keep the intro part
-            intro = "🧠 TEST YOUR KNOWLEDGE: 🧠\n\n"
-            remaining_length = 300 - len(intro) - 3  # 3 for the "..."
-            truncated_q = quiz_question[:remaining_length] + "..."
-            question = intro + truncated_q
+            question = question[:297] + "..."
             
-        # Clean the options
+        # Process options more efficiently
         options = []
         for option in lesson_data['quiz_options']:
-            # Clean option formatting - strip HTML and normalize spaces
-            clean_option = option.replace("<br>", " ").replace("\n", " ")
-            clean_option = re.sub(r'<[^>]*>', '', clean_option)  # Remove HTML tags
-            clean_option = clean_option.replace('**', '').replace('*', '')  # Remove markdown
+            # Simplified cleaning
+            clean_option = re.sub(r'<[^>]*>|\*\*|\*|<br>|\n', ' ', option)
+            clean_option = re.sub(r'\s+', ' ', clean_option).strip()
             
             if len(clean_option) > 100:
                 clean_option = clean_option[:97] + "..."
             options.append(clean_option)
             
-        # Clean explanation text too
-        explanation = lesson_data['explanation'].replace("<br>", " ").replace("\n", " ")
-        explanation = re.sub(r'<[^>]*>', '', explanation)  # Remove HTML tags
-        explanation = explanation.replace('**', '').replace('*', '')  # Remove markdown
+        # Simplified explanation cleaning
+        explanation = re.sub(r'<[^>]*>|\*\*|\*|<br>|\n', ' ', lesson_data['explanation'])
+        explanation = re.sub(r'\s+', ' ', explanation).strip()
         if len(explanation) > 200:
             explanation = explanation[:197] + "..."
             
@@ -690,9 +709,10 @@ async def send_lesson(user_id: int = None, channel_id: str = None, bot = None):
                 active_quizzes[poll_id] = {
                     'correct_option': lesson_data['correct_option_index'],
                     'explanation': explanation,
-                    'theme': theme,  # Store theme for OpenAI explanation
-                    'question': quiz_question,  # Store full question
-                    'options': options  # Store options for custom explanation
+                    'theme': theme,  
+                    'question': quiz_question,
+                    'options': options,
+                    'option_explanations': lesson_data.get('option_explanations', [])
                 }
                 logger.info(f"Stored quiz data for poll {poll_id}")
         except Exception as e:
@@ -894,89 +914,72 @@ async def image_command(update: Update, context: CallbackContext):
 
 
 async def send_large_text_in_chunks(bot, chat_id: int, text: str, max_chunk_size: int = 4000):
-    """
-    Split large text into smaller chunks and send them as separate messages.
-    Attempts to split at paragraph boundaries when possible.
-    
-    Args:
-        bot: The Telegram bot instance
-        chat_id: The target chat ID
-        text: The text to send
-        max_chunk_size: Maximum size of each chunk (default: 4000 characters)
-    """
-    if not text:
-        return
-        
-    logger.info(f"Splitting large text ({len(text)} chars) into multiple messages")
-    
+    """Send large text in chunks - optimized for performance"""
+    # If the text is small enough, send it directly
     if len(text) <= max_chunk_size:
-        # Send as single message if it fits
-        await bot.send_message(
-            chat_id=chat_id,
-            text=text,
-            parse_mode=ParseMode.HTML
-        )
-        return
-        
-    # Find paragraph breaks to split on
-    paragraphs = re.split(r'\n\n+', text)
+        try:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode=ParseMode.HTML
+            )
+            return
+        except Exception as e:
+            logger.error(f"Error sending message: {e}")
+            # Try to send without HTML formatting as fallback
+            try:
+                clean_text = re.sub(r'<[^>]*>', '', text)
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=clean_text
+                )
+                return
+            except Exception as inner_e:
+                logger.error(f"Failed to send even plaintext message: {inner_e}")
+                return
     
+    # For larger texts, split into chunks
     chunks = []
     current_chunk = ""
+    paragraphs = text.split("\n\n")
     
     for paragraph in paragraphs:
-        # If adding this paragraph would exceed the limit, start a new chunk
-        if len(current_chunk) + len(paragraph) + 2 > max_chunk_size:
-            # If the current paragraph alone is too big, split it further
-            if len(paragraph) > max_chunk_size:
-                # Add current chunk if not empty
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-                    current_chunk = ""
-                
-                # Split large paragraph into smaller pieces
-                for i in range(0, len(paragraph), max_chunk_size - 200):
-                    sub_para = paragraph[i:i + max_chunk_size - 200]
-                    
-                    # Only add as a complete chunk if it's large enough
-                    if len(sub_para) >= max_chunk_size - 500:
-                        chunks.append(sub_para.strip())
-                    else:
-                        current_chunk = sub_para
-            else:
-                # Add the current chunk and start a new one
-                chunks.append(current_chunk.strip())
-                current_chunk = paragraph
-        else:
-            # Add paragraph to current chunk with proper spacing
+        if len(current_chunk) + len(paragraph) + 2 <= max_chunk_size:
             if current_chunk:
                 current_chunk += "\n\n" + paragraph
             else:
                 current_chunk = paragraph
-    
-    # Add the last chunk if not empty
-    if current_chunk:
-        chunks.append(current_chunk.strip())
-    
-    # Send each chunk as a separate message
-    logger.info(f"Sending content in {len(chunks)} separate messages")
-    for i, chunk in enumerate(chunks):
-        # Add continuation indicator for better readability
-        if i > 0:
-            chunk = "⟨...continued⟩\n\n" + chunk
-        if i < len(chunks) - 1:
-            chunk = chunk + "\n\n⟨continued...⟩"
+        else:
+            # If adding this paragraph would exceed the max size, store current chunk
+            if current_chunk:
+                chunks.append(current_chunk)
             
+            # Start a new chunk with this paragraph
+            if len(paragraph) <= max_chunk_size:
+                current_chunk = paragraph
+            else:
+                # If paragraph itself is too long, split it further
+                for i in range(0, len(paragraph), max_chunk_size):
+                    paragraph_part = paragraph[i:i + max_chunk_size]
+                    chunks.append(paragraph_part)
+                current_chunk = ""
+    
+    # Add the last chunk if it's not empty
+    if current_chunk:
+        chunks.append(current_chunk)
+    
+    # Send chunks sequentially
+    for i, chunk in enumerate(chunks):
         try:
             await bot.send_message(
                 chat_id=chat_id,
                 text=chunk,
                 parse_mode=ParseMode.HTML
             )
-            # Small delay to keep messages in order and avoid rate limits
-            await asyncio.sleep(0.5)
+            # Brief delay to avoid rate limits
+            await asyncio.sleep(0.2)
         except Exception as e:
-            logger.error(f"Error sending message chunk {i+1}/{len(chunks)}: {e}")
+            logger.error(f"Error sending chunk {i+1}/{len(chunks)}: {e}")
             # Try to send without HTML formatting as fallback
             try:
                 clean_chunk = re.sub(r'<[^>]*>', '', chunk)
@@ -989,85 +992,82 @@ async def send_large_text_in_chunks(bot, chat_id: int, text: str, max_chunk_size
 
 
 async def on_poll_answer(update: Update, context: CallbackContext):
-    """Handler for when users answer polls"""
+    """Handler for when users answer polls - optimized for performance"""
     answer = update.poll_answer
     poll_id = answer.poll_id
     user_id = answer.user.id
-    selected_option = answer.option_ids[0] if answer.option_ids else None
     
-    # If this is one of our quizzes and has tracking info
-    if poll_id in active_quizzes:
-        quiz_data = active_quizzes[poll_id]
-        correct_option = quiz_data['correct_option']
-        theme = quiz_data.get('theme', 'UI/UX design')
-        question = quiz_data.get('question', '')
-        options = quiz_data.get('options', [])
+    # Skip processing if we don't have this poll in our records
+    if poll_id not in active_quizzes:
+        return
         
-        # User answered correctly
-        if selected_option == correct_option:
-            praise_messages = [
-                "🎉 Well done! That's correct!",
-                "👏 Excellent choice! You got it right!",
-                "✨ Great job! Your answer is correct!",
-                "🌟 Perfect! You've mastered this concept!",
-                "🏆 Correct! You're making excellent progress!"
-            ]
-            feedback = random.choice(praise_messages)
-        # User answered incorrectly
+    # Get poll data with a single dictionary access
+    quiz_data = active_quizzes[poll_id]
+    
+    # Extract all necessary data at once
+    selected_option = answer.option_ids[0] if answer.option_ids else None
+    correct_option = quiz_data['correct_option']
+    theme = quiz_data.get('theme', 'UI/UX design')
+    question = quiz_data.get('question', '')
+    options = quiz_data.get('options', [])
+    option_explanations = quiz_data.get('option_explanations', [])
+    
+    # Pre-defined feedback messages for better performance
+    if selected_option == correct_option:
+        feedback = random.choice([
+            "🎉 Well done! That's correct!",
+            "👏 Excellent choice! You got it right!",
+            "✨ Great job! Your answer is correct!",
+            "🌟 Perfect! You've mastered this concept!",
+            "🏆 Correct! You're making excellent progress!"
+        ])
+    else:
+        feedback = random.choice([
+            "📚 Good attempt! Learning comes from trying.",
+            "💪 Keep going! Every question helps you improve.",
+            "🔍 Almost there! Review the explanation below.",
+            "📝 Practice makes perfect! Try more questions to build your skills.",
+            "💡 Not quite, but that's how we learn! Check out the explanation."
+        ])
+    
+    try:
+        # Use the pre-generated explanation for the selected option if available
+        explanation = ""
+        if option_explanations and len(option_explanations) > selected_option and selected_option >= 0:
+            explanation = option_explanations[selected_option]
         else:
-            motivation_messages = [
-                "📚 Good attempt! Learning comes from trying.",
-                "💪 Keep going! Every question helps you improve.",
-                "🔍 Almost there! Review the explanation below.",
-                "📝 Practice makes perfect! Try more questions to build your skills.",
-                "💡 Not quite, but that's how we learn! Check out the explanation."
-            ]
-            feedback = random.choice(motivation_messages)
+            # Fallback to the original explanation if option-specific explanations aren't available
+            explanation = quiz_data.get('explanation', '')
+            
+            # Add context about which option was correct if they chose incorrectly
+            if selected_option != correct_option and explanation:
+                correct_option_text = options[correct_option] if 0 <= correct_option < len(options) else "another option"
+                explanation = f"The correct answer was: {correct_option_text}\n\n{explanation}"
         
+        # Combine feedback and explanation - avoid extra string operations
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=f"{feedback}\n\n{explanation}",
+            parse_mode=ParseMode.HTML
+        )
+        logger.info(f"Sent quiz feedback to user {user_id}")
+        
+        # Clean up - remove this quiz from tracking
+        del active_quizzes[poll_id]
+    except Exception as e:
+        logger.error(f"Error sending quiz feedback: {e}")
+        persistence.update_health_status(error=True)
+        # Send a simple response if there's an error
         try:
-            # Get custom explanation from OpenAI
-            custom_explanation = await openai_client.generate_custom_explanation(
-                theme=theme,
-                quiz_question=question,
-                options=options,
-                correct_index=correct_option,
-                user_choice_index=selected_option
-            )
-            
-            # If we got a valid explanation from OpenAI, use it; otherwise fall back to the original
-            explanation = custom_explanation if custom_explanation else quiz_data['explanation']
-            
-            # Send feedback with explanation
-            full_message = f"{feedback}\n\n{explanation}"
-            
             await context.bot.send_message(
                 chat_id=user_id,
-                text=full_message,
-                parse_mode=ParseMode.HTML
+                text="Thanks for answering! Keep practicing to improve your UI/UX skills."
             )
-            logger.info(f"Sent custom quiz feedback to user {user_id}")
             
-            # Clean up - remove this quiz from tracking
-            # This prevents sending multiple explanations if user changes answer
+            # Clean up even on fallback
             del active_quizzes[poll_id]
-        except Exception as e:
-            logger.error(f"Error sending quiz feedback: {e}")
-            
-            # Fallback to original explanation if we couldn't get a custom one
-            full_message = f"{feedback}\n\n💡 <b>Explanation:</b>\n{quiz_data['explanation']}"
-            
-            try:
-                await context.bot.send_message(
-                    chat_id=user_id,
-                    text=full_message,
-                    parse_mode=ParseMode.HTML
-                )
-                logger.info(f"Sent fallback quiz feedback to user {user_id}")
-                
-                # Clean up even on fallback
-                del active_quizzes[poll_id]
-            except Exception as inner_e:
-                logger.error(f"Error sending fallback feedback: {inner_e}")
+        except Exception as inner_e:
+            logger.error(f"Failed to send even simple feedback: {inner_e}")
 
 
 def setup_handlers(application):

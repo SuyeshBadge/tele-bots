@@ -34,8 +34,8 @@ AUTO_ADMIN_SUBSCRIBERS = os.getenv("AUTO_ADMIN_SUBSCRIBERS", "False").lower() in
 
 # OpenAI configuration
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4")  # Allow configurable model
-DISABLE_OPENAI = os.getenv("DISABLE_OPENAI", "False").lower() in ("true", "1", "yes")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")  # Faster model by default
+DISABLE_OPENAI = os.getenv("DISABLE_OPENAI", "false").lower() == "true"
 
 # Image source configuration
 ENABLE_DALLE_IMAGES = os.getenv("ENABLE_DALLE_IMAGES", "False").lower() in ("true", "1", "yes")
@@ -50,7 +50,7 @@ MAX_DAILY_LESSONS = os.getenv("MAX_DAILY_LESSONS", "5")  # Maximum on-demand les
 UNSPLASH_API_KEY = os.getenv("UNSPLASH_API_KEY", "")  # For Unsplash images
 
 # API request settings
-REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))  # Timeout for external API requests
+REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "15"))  # 15 seconds timeout instead of 30
 
 # SSL verification settings
 DISABLE_SSL_VERIFICATION = os.getenv("DISABLE_SSL_VERIFICATION", "False").lower() in ("true", "1", "yes")
@@ -245,6 +245,17 @@ UI_UX_THEMES = [
     "Push Notification Strategy",
     "Email Design for Engagement",
 ]
+
+# Performance settings
+ENABLE_CACHING = os.getenv("ENABLE_CACHING", "true").lower() == "true"
+CACHE_TTL = int(os.getenv("CACHE_TTL", "86400"))  # 24 hours in seconds
+NEXT_LESSON_COOLDOWN = int(os.getenv("NEXTLESSON_COOLDOWN", "300"))  # 5 minutes in seconds
+USE_PRECOMPUTED_RESPONSES = os.getenv("USE_PRECOMPUTED_RESPONSES", "true").lower() == "true"
+
+# Logging settings
+DETAILED_OPENAI_LOGGING = os.getenv("DETAILED_OPENAI_LOGGING", "true").lower() == "true"
+LOG_OPENAI_REQUESTS = os.getenv("LOG_OPENAI_REQUESTS", "true").lower() == "true"
+LOG_OPENAI_RESPONSES = os.getenv("LOG_OPENAI_RESPONSES", "true").lower() == "true"
 
 # Validate required settings
 def validate_settings():
