@@ -22,9 +22,6 @@ RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
 COPY dist/ ./dist/
 COPY .env.example ./
 
-# Copy images directory, including generated subdirectory
-COPY images/ ./images/
-
 # Ensure we can write to logs directory (not mounted as a volume)
 RUN mkdir -p /app/logs && chown -R appuser:appgroup /app/logs
 
