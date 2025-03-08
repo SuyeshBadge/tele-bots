@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '../config/config.service';
+import { ConfigService } from '@nestjs/config';
 import { ExpenseService } from '../expense/expense.service';
 import { ExpenseCategory, PaymentMethod } from '../models/expense.model';
 

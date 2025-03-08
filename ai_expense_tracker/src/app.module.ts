@@ -11,7 +11,6 @@ import { ApiModule } from './api/api.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtMiddleware } from './auth/middleware/jwt.middleware';
 import { JwtService } from '@nestjs/jwt';
-import { UserService } from './user/user.service';
 
 @Module({
   imports: [
@@ -46,12 +45,11 @@ import { UserService } from './user/user.service';
 export class AppModule implements NestModule {
   constructor(
     private readonly jwtService: JwtService,
-    private readonly userService: UserService,
   ) {}
   
   configure(consumer: MiddlewareConsumer) {
     consumer
-      .apply(new JwtMiddleware(this.jwtService, this.userService).use)
+      .apply(new JwtMiddleware(this.jwtService).use)
       .forRoutes('api/*'); // Apply to all API routes
   }
 } 

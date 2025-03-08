@@ -1,22 +1,5 @@
-# Build stage
-FROM node:18-alpine AS builder
-
-# Set working directory
-WORKDIR /app
-
-# Copy package files and install dependencies
-COPY package*.json ./
-RUN npm ci
-
-# Copy source code
-COPY tsconfig.json ./
-COPY src/ ./src/
-
-# Build the application
-RUN npm run build
-
-# Production stage
-FROM node:18-alpine AS production
+# Use a simple production image
+FROM node:18-alpine
 
 # Set environment variables
 ENV NODE_ENV=production
@@ -32,15 +15,16 @@ RUN addgroup -S appgroup && \
     chown -R appuser:appgroup /app
 
 # Copy package files and install production dependencies only
-COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+COPY package.json ./
+RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
 
-# Copy built application from builder stage
-COPY --from=builder --chown=appuser:appgroup /app/dist ./dist
+# Copy pre-built application (built before docker build)
+COPY dist/ ./dist/
+COPY .env.example ./
+COPY images/ ./images/
 
-# Copy necessary files
-COPY --chown=appuser:appgroup .env.example ./
-COPY --chown=appuser:appgroup images/ ./images/
+# Ensure we can write to logs directory (not mounted as a volume)
+RUN mkdir -p /app/logs && chown -R appuser:appgroup /app/logs
 
 # Switch to non-root user
 USER appuser

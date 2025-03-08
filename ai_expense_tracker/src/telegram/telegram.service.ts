@@ -27,6 +27,13 @@ export class TelegramService implements OnModuleInit {
 
   onModuleInit() {
     const token = this.configService.get('TELEGRAM_BOT_TOKEN');
+    const nodeEnv = this.configService.get('NODE_ENV');
+    
+    // Skip Telegram bot initialization in development mode if token is not valid
+    if (nodeEnv === 'development' && (!token || token === 'your_telegram_bot_token_here')) {
+      this.logger.warn('Telegram bot skipped in development mode. Set a valid token to enable it.');
+      return;
+    }
     
     if (!token) {
       this.logger.warn('Telegram bot token not configured. Bot will not start.');

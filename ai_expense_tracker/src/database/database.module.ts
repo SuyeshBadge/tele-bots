@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { ConfigModule } from '../config/config.module';
-import { ConfigService } from '../config/config.service';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 
 @Module({
   imports: [
@@ -10,6 +9,8 @@ import { ConfigService } from '../config/config.service';
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         uri: configService.get('MONGODB_URI'),
+        useNewUrlParser: true,
+        useUnifiedTopology: true,
       }),
     }),
   ],
