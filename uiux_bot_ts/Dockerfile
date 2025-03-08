@@ -19,8 +19,6 @@ COPY package.json ./
 RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
 
 # Copy pre-built application (built before docker build)
-COPY dist/ ./dist/
-COPY .env.example ./
 
 # Ensure we can write to logs directory (not mounted as a volume)
 RUN mkdir -p /app/logs && chown -R appuser:appgroup /app/logs
