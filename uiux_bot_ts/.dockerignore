@@ -6,7 +6,7 @@
 **/yarn-error.log
 
 # Build
-# **/dist  # We need to include dist for our simplified Dockerfile
+**/dist  # We're building inside the container, so we should exclude local dist
 **/build
 **/*.tsbuildinfo
 
