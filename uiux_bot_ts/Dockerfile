@@ -1,4 +1,21 @@
 # Use a simple production image
+# Build stage
+FROM node:18-alpine AS builder
+
+# Set up build environment
+WORKDIR /app
+COPY package*.json ./
+
+# Install all dependencies (including dev dependencies)
+RUN npm install
+
+# Copy source code
+COPY . .
+
+# Build the application
+RUN npm run build
+
+# Production stage
 FROM node:18-alpine
 
 # Set environment variables
@@ -18,7 +35,9 @@ RUN addgroup -S appgroup && \
 COPY package.json ./
 RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
 
-# Copy pre-built application (built before docker build)
+# Copy pre-built application from builder stage
+COPY --from=builder /app/dist/ ./dist/
+COPY .env.example ./
 
 # Ensure we can write to logs directory (not mounted as a volume)
 RUN mkdir -p /app/logs && chown -R appuser:appgroup /app/logs
