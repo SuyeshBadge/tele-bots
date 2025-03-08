@@ -776,7 +776,7 @@ export async function onPollAnswer(ctx: BotContext): Promise<void> {
       feedbackHeader = incorrectHeaders[Math.floor(Math.random() * incorrectHeaders.length)];
     }
     
-    // Format the explanation message with more personality
+    // Add user's choice and correctness with more engaging formatting
     let feedbackMessage = `${feedbackHeader}\n\n`;
     
     // Add user's choice and correctness with more engaging formatting
@@ -784,36 +784,44 @@ export async function onPollAnswer(ctx: BotContext): Promise<void> {
       ? `✅ You selected: *${userChoice}*\n\n`
       : `🔍 You selected: *${userChoice}*\n✅ Correct answer: *${correctAnswer}*\n\n`;
     
-    // Format the explanation for better readability and impact
-    // Ensure explanation is not empty and properly formatted
-    if (explanation && explanation.trim()) {
-      const formattedExplanation = explanation
-        .replace(/Incorrect\./g, "❌ *Incorrect!* ") // Highlight "Incorrect" parts
-        .replace(/Correct\!/g, "✅ *Correct!* ")     // Highlight "Correct" parts
-        .trim();
+    // Use appropriate option explanation instead of trying to format all explanations
+    if (isCorrect && quizData.option_explanations && quizData.option_explanations[selectedOption]) {
+      // For correct answers, only show the explanation for the selected option (which is the correct one)
+      feedbackMessage += `${quizData.option_explanations[selectedOption]}\n\n`;
       
-      // Add the enhanced explanation
-      feedbackMessage += `${formattedExplanation}\n\n`;
+      logActivity('explanation_included', userId, 'Correct option explanation included in quiz feedback', {
+        explanationLength: quizData.option_explanations[selectedOption].length
+      });
+    } else if (!isCorrect) {
+      // For incorrect answers, show explanation for the correct option only
+      if (quizData.option_explanations && quizData.option_explanations[quizData.correctOption]) {
+        feedbackMessage += `${quizData.option_explanations[quizData.correctOption]}\n\n`;
+        
+        logActivity('explanation_included', userId, 'Correct option explanation included for incorrect answer', {
+          explanationLength: quizData.option_explanations[quizData.correctOption].length
+        });
+      }
+    } else if (explanation && explanation.trim()) {
+      // Fallback to general explanation if no option-specific explanation is available
+      feedbackMessage += `${explanation}\n\n`;
       
-      // Log that explanation was included
-      logActivity('explanation_included', userId, 'Explanation was included in quiz feedback', {
+      logActivity('explanation_included', userId, 'General explanation included in quiz feedback', {
         explanationLength: explanation.length
       });
     } else {
-      // Fallback explanation if somehow the explanation is empty
+      // Last resort fallback explanation
       const fallbackExplanation = isCorrect 
         ? `The answer "${correctAnswer}" is correct for this question about ${quizData.theme || 'UI/UX design'}.` 
         : `The correct answer is "${correctAnswer}" for this question about ${quizData.theme || 'UI/UX design'}.`;
       
       feedbackMessage += `${fallbackExplanation}\n\n`;
       
-      // Log that fallback explanation was used
       logActivity('fallback_explanation_used', userId, 'Used fallback explanation due to missing explanation data', {
         isCorrect,
         questionTheme: quizData.theme
       });
     }
-    
+
     // Add more personalized and motivating conclusion
     if (isCorrect) {
       // More varied and encouraging correct answer messages
@@ -864,41 +872,41 @@ export async function onPollAnswer(ctx: BotContext): Promise<void> {
     }
     
     // ENSURE EXPLANATION IS SENT: Always send a direct explanation message
-    try {
-      // Always send a clear, direct explanation message
-      let directExplanation: string;
-      
-      if (isCorrect) {
-        directExplanation = `✅ *Why this answer is correct:*\n\n`;
-      } else {
-        directExplanation = `🔍 *Why the correct answer is "${quizData.options[quizData.correctOption]}":*\n\n`;
-      }
-      
-      // Use the most detailed explanation available
-      if (isCorrect && quizData.option_explanations && quizData.option_explanations[quizData.correctOption]) {
-        // If correct and we have a specific explanation for the correct option, use it
-        directExplanation += quizData.option_explanations[quizData.correctOption];
-      } else if (!isCorrect && quizData.option_explanations && quizData.option_explanations[quizData.correctOption]) {
-        // If incorrect, explain the correct answer
-        directExplanation += quizData.option_explanations[quizData.correctOption];
-      } else if (quizData.explanation) {
-        // Fall back to general explanation
-        directExplanation += quizData.explanation;
-      } else {
-        // Last resort
-        directExplanation += `This answer relates to best practices in ${quizData.theme || 'UI/UX design'}.`;
-      }
-      
-      // Send direct explanation with explicit chat ID
-      await ctx.api.sendMessage(userId, directExplanation, { parse_mode: 'Markdown' });
-    } catch (directExplError) {
-      logger.error(`Error sending direct explanation: ${directExplError instanceof Error ? directExplError.message : String(directExplError)}`);
-      
-      // Last resort: try plain text with no formatting
+    // Only send this if the primary feedback wasn't sent or for complex explanations
+    if (!feedbackSent || (quizData.option_explanations && quizData.option_explanations.length > 0 && quizData.option_explanations.some(e => e.length > 100))) {
       try {
-        await ctx.api.sendMessage(userId, `Explanation: ${quizData.explanation || 'This question tests your knowledge of important UI/UX principles.'}`);
-      } catch (finalError) {
-        logger.error(`FINAL ERROR sending explanation: ${finalError instanceof Error ? finalError.message : String(finalError)}`);
+        // Send a clear explanation only if needed
+        let directExplanation: string;
+        
+        if (isCorrect) {
+          directExplanation = `✅ *Why this answer is correct:*\n\n`;
+        } else {
+          directExplanation = `🔍 *Why the correct answer is "${quizData.options[quizData.correctOption]}":*\n\n`;
+        }
+        
+        // Use the most detailed explanation available
+        if (quizData.option_explanations && quizData.option_explanations[quizData.correctOption]) {
+          // Always explain the correct answer
+          directExplanation += quizData.option_explanations[quizData.correctOption];
+        } else if (quizData.explanation) {
+          // Fall back to general explanation
+          directExplanation += quizData.explanation;
+        } else {
+          // Last resort
+          directExplanation += `This answer relates to best practices in ${quizData.theme || 'UI/UX design'}.`;
+        }
+        
+        // Send direct explanation with explicit chat ID
+        await ctx.api.sendMessage(userId, directExplanation, { parse_mode: 'Markdown' });
+      } catch (directExplError) {
+        logger.error(`Error sending direct explanation: ${directExplError instanceof Error ? directExplError.message : String(directExplError)}`);
+        
+        // Last resort: try plain text with no formatting
+        try {
+          await ctx.api.sendMessage(userId, `Explanation: ${quizData.explanation || 'This question tests your knowledge of important UI/UX principles.'}`);
+        } catch (finalError) {
+          logger.error(`FINAL ERROR sending explanation: ${finalError instanceof Error ? finalError.message : String(finalError)}`);
+        }
       }
     }
     

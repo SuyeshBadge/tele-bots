@@ -37,5 +37,5 @@
 
 # Data files
 **/data/*.json
-**/images/generated/ 
+# **/images/generated/  # We need to include the images directory for our Docker build
 fly.toml
