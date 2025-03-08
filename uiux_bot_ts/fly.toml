@@ -1,0 +1,42 @@
+app = "uiux-bot-ts"
+primary_region = "sin" # Singapore - modify as needed
+kill_signal = "SIGINT"
+kill_timeout = 30 # Give the bot 30 seconds to shut down gracefully
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  TZ = "Asia/Kolkata"
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+[checks]
+  [checks.health]
+    port = 8080
+    type = "http"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/health"
+
+[[mounts]]
+  source = "data"
+  destination = "/app/data"
+
+[[mounts]]
+  source = "logs"
+  destination = "/app/logs"
+
+[metrics]
+  port = 8080
+  path = "/metrics" 
