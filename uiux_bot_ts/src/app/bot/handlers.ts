@@ -785,17 +785,29 @@ export async function onPollAnswer(ctx: BotContext): Promise<void> {
       : `🔍 You selected: *${userChoice}*\n✅ Correct answer: *${correctAnswer}*\n\n`;
     
     // Use appropriate option explanation instead of trying to format all explanations
-    if (isCorrect && quizData.option_explanations && quizData.option_explanations[selectedOption]) {
-      // For correct answers, only show the explanation for the selected option (which is the correct one)
-      feedbackMessage += `${quizData.option_explanations[selectedOption]}\n\n`;
+    if (isCorrect && quizData.option_explanations && quizData.option_explanations[quizData.correctOption]) {
+      // For correct answers, use the explanation for the CORRECT option (not selectedOption)
+      feedbackMessage += `${quizData.option_explanations[quizData.correctOption]}\n\n`;
       
       logActivity('explanation_included', userId, 'Correct option explanation included in quiz feedback', {
-        explanationLength: quizData.option_explanations[selectedOption].length
+        explanationLength: quizData.option_explanations[quizData.correctOption].length
       });
     } else if (!isCorrect) {
       // For incorrect answers, show explanation for the correct option only
       if (quizData.option_explanations && quizData.option_explanations[quizData.correctOption]) {
-        feedbackMessage += `${quizData.option_explanations[quizData.correctOption]}\n\n`;
+        // Get the correct option explanation
+        let correctExplanation = quizData.option_explanations[quizData.correctOption];
+        
+        // If the user's answer is incorrect, we need to modify any "Correct!" prefixes
+        // to avoid confusing the user
+        if (!isCorrect) {
+          // Replace "Correct!" with "The correct answer is:" to avoid confusion
+          correctExplanation = correctExplanation
+            .replace(/^Correct!/i, "The correct answer is:")
+            .replace(/^✅\s*Correct!/i, "The correct answer is:");
+        }
+        
+        feedbackMessage += `${correctExplanation}\n\n`;
         
         logActivity('explanation_included', userId, 'Correct option explanation included for incorrect answer', {
           explanationLength: quizData.option_explanations[quizData.correctOption].length
@@ -887,10 +899,28 @@ export async function onPollAnswer(ctx: BotContext): Promise<void> {
         // Use the most detailed explanation available
         if (quizData.option_explanations && quizData.option_explanations[quizData.correctOption]) {
           // Always explain the correct answer
-          directExplanation += quizData.option_explanations[quizData.correctOption];
+          let finalExplanation = quizData.option_explanations[quizData.correctOption];
+          
+          // If the user's answer is incorrect, modify any "Correct!" prefix
+          if (!isCorrect) {
+            finalExplanation = finalExplanation
+              .replace(/^Correct!/i, "")
+              .replace(/^✅\s*Correct!/i, "");
+          }
+          
+          directExplanation += finalExplanation;
         } else if (quizData.explanation) {
           // Fall back to general explanation
-          directExplanation += quizData.explanation;
+          let finalExplanation = quizData.explanation;
+          
+          // If the user's answer is incorrect, modify any "Correct!" prefix
+          if (!isCorrect) {
+            finalExplanation = finalExplanation
+              .replace(/^Correct!/i, "")
+              .replace(/^✅\s*Correct!/i, "");
+          }
+          
+          directExplanation += finalExplanation;
         } else {
           // Last resort
           directExplanation += `This answer relates to best practices in ${quizData.theme || 'UI/UX design'}.`;
@@ -1048,12 +1078,18 @@ function formatLessonContentForMarkdown(title: string, content: string): string 
   
   // Process the content to ensure proper markdown formatting
   let processedContent = content
+    // Remove any triple backticks that might be causing formatting issues
+    .replace(/```/g, '')
     // Ensure all bullet points are properly formatted
     .replace(/•\s*/g, '• ')
     // Ensure proper bold formatting
     .replace(/\*\*/g, '*')
     // Fix any broken emoji sequences
     .replace(/:\s*\)/g, ':)')
+    // Convert HTML bold tags to markdown bold (if present)
+    .replace(/<b>(.*?)<\/b>/g, '*$1*')
+    // Remove any HTML tags that might interfere with markdown
+    .replace(/<[^>]*>/g, '')
     // Ensure proper line breaks (at least 2 spaces at the end of a line for a line break)
     .replace(/(\S)(\n)(\S)/g, '$1  \n$3');
   

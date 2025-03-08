@@ -376,11 +376,14 @@ export async function generateLesson(theme?: string): Promise<string> {
     const randomEmoji = titleEmojis[Math.floor(Math.random() * titleEmojis.length)];
     const formattedContent = `<b>${randomEmoji} ${lessonData.title} ${randomEmoji}</b>\n\n${contentString}`;
     
+    // Remove any triple backticks that might cause formatting issues
+    const cleanedContent = formattedContent.replace(/```/g, '');
+    
     logger.info(`Successfully formatted lesson on theme: ${lessonTheme} with ${
       Array.isArray(lessonData.content_points) ? lessonData.content_points.length : 0
-    } content points`);
+    } points`);
     
-    return formattedContent;
+    return cleanedContent;
   } catch (error) {
     logger.error(`Error generating lesson: ${error instanceof Error ? error.message : String(error)}`);
     throw new Error(`Failed to generate lesson: ${error instanceof Error ? error.message : String(error)}`);
