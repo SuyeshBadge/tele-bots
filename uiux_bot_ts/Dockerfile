@@ -4,10 +4,16 @@ FROM node:18-alpine AS builder
 
 # Set up build environment
 WORKDIR /app
+
+# Install build dependencies for native modules
+RUN apk add --no-cache python3 make g++ git
+
+# Copy package files
 COPY package*.json ./
 
-# Install all dependencies (including dev dependencies)
-RUN npm install
+# Install all dependencies with better error handling and retry logic
+RUN npm config set network-timeout 300000 && \
+    npm ci || (npm cache clean --force && npm ci)
 
 # Copy source code
 COPY . .
@@ -32,8 +38,12 @@ RUN addgroup -S appgroup && \
     chown -R appuser:appgroup /app
 
 # Copy package files and install production dependencies only
-COPY package.json ./
-RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
+COPY package.json package-lock.json* ./
+RUN apk add --no-cache --virtual .build-deps python3 make g++ && \
+    npm config set network-timeout 300000 && \
+    npm ci --only=production --ignore-scripts && \
+    npm cache clean --force && \
+    apk del .build-deps
 
 # Copy pre-built application from builder stage
 COPY --from=builder /app/dist/ ./dist/
