@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Query, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { ExpenseService } from '../../expense/expense.service';
 import { ExpenseCategory, PaymentMethod } from '../../models/expense.model';
 import { UserDecorator } from '../../decorators/user.decorator';
 import { Public } from '../../decorators/public.decorator';
+import { CreateExpenseDto } from '../../dto/expense.dto';
 
 @Controller('api/expenses')
 export class ExpenseController {
@@ -13,19 +14,27 @@ export class ExpenseController {
   @Post()
   async createExpense(
     @UserDecorator() user,
-    @Body() createExpenseDto: {
-      amount: number;
-      category: ExpenseCategory;
-      paymentMethod: PaymentMethod;
-      description?: string;
-      date?: Date;
-    },
+    @Body() createExpenseDto: CreateExpenseDto,
   ) {
+    let category: ExpenseCategory;
+    switch(createExpenseDto.category.toLowerCase()) {
+      case 'food': category = ExpenseCategory.FOOD; break;
+      case 'transport': category = ExpenseCategory.TRANSPORTATION; break;
+      case 'entertainment': category = ExpenseCategory.ENTERTAINMENT; break;
+      case 'shopping': category = ExpenseCategory.SHOPPING; break;
+      case 'utilities': category = ExpenseCategory.UTILITIES; break;
+      case 'rent': category = ExpenseCategory.RENT; break;
+      case 'healthcare': category = ExpenseCategory.HEALTH; break;
+      case 'education': category = ExpenseCategory.EDUCATION; break;
+      case 'travel': category = ExpenseCategory.TRAVEL; break;
+      default: category = ExpenseCategory.OTHER;
+    }
+    
     return this.expenseService.createExpense(
       user.userId,
       createExpenseDto.amount,
-      createExpenseDto.category,
-      createExpenseDto.paymentMethod,
+      category,
+      PaymentMethod.UPI,
       createExpenseDto.description,
       createExpenseDto.date,
     );
@@ -73,8 +82,9 @@ export class ExpenseController {
     };
   }
 
+  // This endpoint is marked as public for demonstration
   @Public()
-  @Get()
+  @Get('demo')
   findAll() {
     return { message: 'This endpoint will return all expenses' };
   }

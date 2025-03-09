@@ -3,6 +3,7 @@ import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { UserService } from '../../user/user.service';
 import { UserDecorator } from '../../decorators/user.decorator';
 import { Public } from '../../decorators/public.decorator';
+import { UpdateUserPreferencesDto, UpdateOnboardingStatusDto } from '../../dto/user.dto';
 
 @Controller('api/users')
 export class UserController {
@@ -18,12 +19,7 @@ export class UserController {
   @Put('preferences')
   async updatePreferences(
     @UserDecorator() user,
-    @Body() updatePreferencesDto: {
-      notificationsEnabled?: boolean;
-      reminderTime?: string;
-      monthlyBudget?: number;
-      budgetCategories?: { [key: string]: number };
-    },
+    @Body() updatePreferencesDto: UpdateUserPreferencesDto,
   ) {
     return this.userService.updateUserPreferences(
       user.userId,
@@ -35,7 +31,7 @@ export class UserController {
   @Put('onboarding')
   async updateOnboardingStatus(
     @UserDecorator() user,
-    @Body() updateOnboardingDto: { isOnboarded: boolean },
+    @Body() updateOnboardingDto: UpdateOnboardingStatusDto,
   ) {
     return this.userService.setOnboardingStatus(
       user.userId,

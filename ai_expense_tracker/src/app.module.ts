@@ -11,6 +11,8 @@ import { ApiModule } from './api/api.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtMiddleware } from './auth/middleware/jwt.middleware';
 import { JwtService } from '@nestjs/jwt';
+import { RequestLoggerMiddleware } from './middleware/request-logger.middleware';
+import { MessageModule } from './common/messages/message.module';
 
 @Module({
   imports: [
@@ -29,6 +31,7 @@ import { JwtService } from '@nestjs/jwt';
     // Core modules
     DatabaseModule,
     AuthModule,
+    MessageModule,
     
     // Domain modules
     ExpenseModule,
@@ -48,8 +51,14 @@ export class AppModule implements NestModule {
   ) {}
   
   configure(consumer: MiddlewareConsumer) {
+    // Apply JWT middleware to all API routes
     consumer
       .apply(new JwtMiddleware(this.jwtService).use)
-      .forRoutes('api/*'); // Apply to all API routes
+      .forRoutes('api/*');
+      
+    // Apply request logger middleware to all API routes
+    consumer
+      .apply(RequestLoggerMiddleware)
+      .forRoutes('api/*');
   }
 } 

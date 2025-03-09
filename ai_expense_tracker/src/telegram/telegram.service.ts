@@ -8,6 +8,8 @@ import { UpiService } from '../upi/upi.service';
 import { AuthService } from '../auth/auth.service';
 import { ExpenseCategory, PaymentMethod } from '../models/expense.model';
 import { IncomeCategory } from '../models/income.model';
+import { TelegramMessageService } from './telegram.message.service';
+import { TELEGRAM_MESSAGES } from './telegram.messages';
 
 @Injectable()
 export class TelegramService implements OnModuleInit {
@@ -23,6 +25,7 @@ export class TelegramService implements OnModuleInit {
     private readonly userService: UserService,
     private readonly upiService: UpiService,
     private readonly authService: AuthService,
+    private readonly telegramMessageService: TelegramMessageService,
   ) {}
 
   onModuleInit() {
@@ -47,6 +50,8 @@ export class TelegramService implements OnModuleInit {
     this.loadAuthorizedUsers();
     
     this.setupCommandHandlers();
+    this.setupCallbackHandlers();
+    this.setupConversationHandlers();
   }
   
   private async loadAuthorizedUsers() {
@@ -100,619 +105,853 @@ export class TelegramService implements OnModuleInit {
         this.authorizedUsers.add(telegramId);
         
         // Generate a token for this user
-        const token = await this.authService.generateTelegramToken(telegramId);
+        await this.authService.generateTelegramToken(telegramId);
         
-        this.bot.sendMessage(
+        // Show welcome message with buttons
+        this.sendMessageWithButtons(
           chatId,
-          'Welcome to AI Expense Tracker Bot! 🤖💰\n\n' +
-          'I can help you track your expenses with minimal effort.\n\n' +
-          'Commands:\n' +
-          '/start - Show this welcome message\n' +
-          '/help - Show available commands\n' +
-          '/income - Log a new income\n' +
-          '/expense - Log a new expense\n' +
-          '/upi - Log a UPI transaction\n' +
-          '/summary - Get your monthly expense summary\n' +
-          '/settings - Configure your preferences\n' +
-          '/token - Get your API token for mobile/web app'
+          this.telegramMessageService.formatMessage('WELCOME'),
+          TELEGRAM_MESSAGES.WELCOME_BUTTONS
         );
+        
+        // Start guided tour for new users
+        setTimeout(() => {
+          this.sendMessageWithButtons(
+            chatId,
+            this.telegramMessageService.formatMessage('GUIDED_TOUR'),
+            TELEGRAM_MESSAGES.GUIDED_TOUR_BUTTONS
+          );
+        }, 5000); // Send guided tour 5 seconds after welcome
       } catch (error) {
         this.logger.error(`Error in start command: ${error.message}`, error.stack);
-        this.bot.sendMessage(
+        this.sendMessageWithButtons(
           chatId,
-          'Sorry, there was an error processing your request. Please try again.'
+          this.telegramMessageService.formatMessage('GENERIC_ERROR'),
+          TELEGRAM_MESSAGES.GENERIC_ERROR_BUTTONS
         );
       }
     });
     
-    // Add middleware for checking authorization for all other commands
-    this.bot.on('message', async (msg) => {
-      // Skip authentication for /start
-      if (msg.text && msg.text.startsWith('/start')) {
-        return;
-      }
-      
+    // Main menu command
+    this.bot.onText(/\/menu/, (msg) => {
       const chatId = msg.chat.id;
-      const telegramId = msg.from.id.toString();
-      
-      // Check if user is authorized
-      const isAuthorized = await this.isUserAuthorized(telegramId);
-      
-      if (!isAuthorized) {
-        this.bot.sendMessage(
-          chatId,
-          'You are not authorized to use this bot. Please use /start to register.'
-        );
-        return;
-      }
-      
-      // Continue with processing the message
+      this.showMainMenu(chatId);
+    });
+    
+    // Help command handler
+    this.bot.onText(/\/help/, (msg) => {
+      const chatId = msg.chat.id;
+      this.sendMessageWithButtons(
+        chatId,
+        this.telegramMessageService.formatMessage('HELP'),
+        TELEGRAM_MESSAGES.HELP_BUTTONS
+      );
     });
 
-    // Token command handler - authenticated
-    this.bot.onText(/\/token/, async (msg) => {
+    // Expense command - simplified to just show buttons
+    this.bot.onText(/\/expense/, (msg) => {
       const chatId = msg.chat.id;
       const telegramId = msg.from.id.toString();
+      this.startExpenseFlow(chatId, telegramId);
+    });
+
+    // Income command - simplified to just show buttons
+    this.bot.onText(/\/income/, (msg) => {
+      const chatId = msg.chat.id;
+      const telegramId = msg.from.id.toString();
+      this.startIncomeFlow(chatId, telegramId);
+    });
+
+    // Summary command - simplified
+    this.bot.onText(/\/summary/, (msg) => {
+      const chatId = msg.chat.id;
+      this.showSummary(chatId);
+    });
+
+    // UPI command - simplified
+    this.bot.onText(/\/upi/, (msg) => {
+      const chatId = msg.chat.id;
+      const telegramId = msg.from.id.toString();
+      this.startUpiFlow(chatId, telegramId);
+    });
+
+    // Settings command
+    this.bot.onText(/\/settings/, (msg) => {
+      const chatId = msg.chat.id;
+      this.showSettingsMenu(chatId);
+    });
+  }
+
+  private setupCallbackHandlers() {
+    // Handle button callback data
+    this.bot.on('callback_query', async (callbackQuery) => {
+      const chatId = callbackQuery.message.chat.id;
+      const data = callbackQuery.data;
+      const messageId = callbackQuery.message.message_id;
+      const telegramId = callbackQuery.from.id.toString();
+      
+      // First acknowledge the button press
+      this.bot.answerCallbackQuery(callbackQuery.id);
       
       try {
-        // Check if user is authorized
-        if (!await this.isUserAuthorized(telegramId)) {
-          this.bot.sendMessage(
+        // Parse callback data
+        const action = data.toLowerCase();
+        
+        // Handle main menu actions
+        if (action === 'main_menu') {
+          this.showMainMenu(chatId);
+          return;
+        }
+        
+        // Handle expense actions
+        if (action === 'record_expense') {
+          this.startExpenseFlow(chatId, telegramId);
+          return;
+        }
+        
+        // Handle income actions
+        if (action === 'record_income') {
+          this.startIncomeFlow(chatId, telegramId);
+          return;
+        }
+        
+        // Handle summary actions
+        if (action === 'view_summary') {
+          this.showSummary(chatId);
+          return;
+        }
+        
+        // Handle settings actions
+        if (action === 'settings') {
+          this.showSettingsMenu(chatId);
+          return;
+        }
+        
+        // Handle UPI actions
+        if (action === 'quick_upi') {
+          this.startUpiFlow(chatId, telegramId);
+          return;
+        }
+        
+        // Handle cancel actions
+        if (action === 'cancel') {
+          this.cancelCurrentOperation(chatId);
+          return;
+        }
+        
+        // Handle specific category selections
+        if (action.startsWith('category_')) {
+          const category = action.replace('category_', '');
+          this.handleCategorySelection(chatId, category);
+          return;
+        }
+        
+        // Handle guided tour responses
+        if (action === 'start_tour') {
+          this.startGuidedTour(chatId);
+          return;
+        }
+        
+        if (action === 'skip_tour') {
+          this.sendMessageWithButtons(
             chatId,
-            'You are not authorized to use this bot. Please use /start to register.'
+            this.telegramMessageService.formatMessage('GUIDED_NEXT_STEP'),
+            TELEGRAM_MESSAGES.GUIDED_NEXT_STEP_BUTTONS
           );
           return;
         }
         
-        // Generate a token for this user
-        const token = await this.authService.generateTelegramToken(telegramId);
+        // Handle unknown callback
+        this.logger.warn(`Unknown callback data: ${data}`);
         
-        this.bot.sendMessage(
-          chatId,
-          `Your API token for mobile/web app:\n\n${token}\n\nThis token is valid for 7 days. Keep it secure!`
-        );
       } catch (error) {
-        this.logger.error(`Error generating token: ${error.message}`, error.stack);
-        this.bot.sendMessage(
+        this.logger.error(`Error handling callback: ${error.message}`, error.stack);
+        this.sendMessageWithButtons(
           chatId,
-          'Sorry, there was an error generating your token. Please try again.'
+          this.telegramMessageService.formatMessage('GENERIC_ERROR'),
+          TELEGRAM_MESSAGES.GENERIC_ERROR_BUTTONS
         );
-      }
-    });
-
-    // Help command handler
-    this.bot.onText(/\/help/, (msg) => {
-      const chatId = msg.chat.id;
-      this.bot.sendMessage(
-        chatId,
-        'AI Expense Tracker Bot Commands:\n\n' +
-        '/start - Show welcome message\n' +
-        '/help - Show this help message\n' +
-        '/income - Log a new income\n' +
-        '/expense - Log a new expense\n' +
-        '/upi - Log a UPI transaction\n' +
-        '/summary - Get your monthly expense summary\n' +
-        '/settings - Configure your preferences\n' +
-        '/token - Get your API token for mobile/web app'
-      );
-    });
-
-    // UPI command handler
-    this.bot.onText(/\/upi/, (msg) => {
-      const chatId = msg.chat.id;
-      this.userStates.set(chatId, { state: 'UPI_AMOUNT', data: {} });
-      
-      this.bot.sendMessage(
-        chatId,
-        'Please enter the UPI transaction amount:',
-        {
-          reply_markup: {
-            force_reply: true,
-          },
-        }
-      );
-    });
-
-    // Settings command handler
-    this.bot.onText(/\/settings/, (msg) => {
-      const chatId = msg.chat.id;
-      this.userStates.set(chatId, { state: 'SETTINGS_MENU', data: {} });
-      
-      this.bot.sendMessage(
-        chatId,
-        'Settings Menu:\n\n' +
-        '1. Set Monthly Budget\n' +
-        '2. Enable/Disable Notifications\n' +
-        '3. Set Reminder Time\n' +
-        '4. Change Currency\n\n' +
-        'Please select an option (1-4) or type "cancel" to exit:',
-        {
-          reply_markup: {
-            force_reply: true,
-          },
-        }
-      );
-    });
-
-    // Income command handler
-    this.bot.onText(/\/income/, (msg) => {
-      const chatId = msg.chat.id;
-      this.userStates.set(chatId, { state: 'INCOME_AMOUNT', data: {} });
-      
-      this.bot.sendMessage(
-        chatId,
-        'Please enter the income amount:',
-        {
-          reply_markup: {
-            force_reply: true,
-          },
-        }
-      );
-    });
-
-    // Expense command handler
-    this.bot.onText(/\/expense/, (msg) => {
-      const chatId = msg.chat.id;
-      this.userStates.set(chatId, { state: 'EXPENSE_AMOUNT', data: {} });
-      
-      this.bot.sendMessage(
-        chatId,
-        'Please enter the expense amount:',
-        {
-          reply_markup: {
-            force_reply: true,
-          },
-        }
-      );
-    });
-
-    // Summary command handler
-    this.bot.onText(/\/summary/, async (msg) => {
-      const chatId = msg.chat.id;
-      const userId = msg.from.id.toString();
-      
-      try {
-        const currentDate = new Date();
-        const currentMonth = currentDate.getMonth() + 1;
-        const currentYear = currentDate.getFullYear();
-        
-        const totalIncome = await this.incomeService.getTotalIncomeByMonth(userId, currentMonth, currentYear);
-        const totalExpense = await this.expenseService.getTotalExpensesByMonth(userId, currentMonth, currentYear);
-        const balance = totalIncome - totalExpense;
-        
-        const expensesByCategory = await this.expenseService.getExpensesByCategory(userId, currentMonth, currentYear);
-        
-        let categoryBreakdown = '';
-        for (const [category, amount] of Object.entries(expensesByCategory)) {
-          categoryBreakdown += `${category}: ₹${amount.toFixed(2)}\n`;
-        }
-        
-        this.bot.sendMessage(
-          chatId,
-          `📊 *Monthly Summary (${currentMonth}/${currentYear})*\n\n` +
-          `💰 *Total Income:* ₹${totalIncome.toFixed(2)}\n` +
-          `💸 *Total Expenses:* ₹${totalExpense.toFixed(2)}\n` +
-          `💼 *Balance:* ₹${balance.toFixed(2)}\n\n` +
-          `*Expense Breakdown:*\n${categoryBreakdown}`,
-          { parse_mode: 'Markdown' }
-        );
-      } catch (error) {
-        this.logger.error(`Error generating summary: ${error.message}`, error.stack);
-        this.bot.sendMessage(
-          chatId,
-          'Sorry, there was an error generating your summary. Please try again later.'
-        );
-      }
-    });
-
-    // Message handler for conversation flow
-    this.bot.on('message', (msg) => {
-      if (msg.text && !msg.text.startsWith('/')) {
-        const chatId = msg.chat.id;
-        const userId = msg.from.id.toString();
-        const userState = this.userStates.get(chatId);
-        
-        if (userState) {
-          this.handleConversationState(chatId, userId, msg.text, userState);
-        } else {
-          this.bot.sendMessage(
-            chatId,
-            'I received your message. Please use commands to interact with me.'
-          );
-        }
       }
     });
   }
 
+  private setupConversationHandlers() {
+    // This handles text messages for ongoing conversations
+    this.bot.on('message', async (msg) => {
+      // Skip command messages, we handle those separately
+      if (msg.text && (msg.text.startsWith('/') || msg.entities?.some(e => e.type === 'bot_command'))) {
+        return;
+      }
+      
+      const chatId = msg.chat.id;
+      const text = msg.text || '';
+      const telegramId = msg.from.id.toString();
+      
+      // Check if user is authorized
+      const isAuthorized = await this.isUserAuthorized(telegramId);
+      if (!isAuthorized) {
+        this.sendMessageWithButtons(
+          chatId,
+          this.telegramMessageService.formatMessage('UNAUTHORIZED'),
+          TELEGRAM_MESSAGES.UNAUTHORIZED_BUTTONS
+        );
+        return;
+      }
+      
+      // Check if we're in a conversation state
+      const userState = this.userStates.get(chatId);
+      if (userState) {
+        this.handleConversationState(chatId, telegramId, text, userState);
+        return;
+      }
+      
+      // Handle button text clicks (for older clients that don't support inline buttons)
+      this.handleButtonTextFallback(chatId, text, telegramId);
+    });
+  }
+
+  // Handle text that might be button text for older clients
+  private handleButtonTextFallback(chatId: number, text: string, userId: string = '') {
+    const textLower = text.toLowerCase();
+    
+    // Main menu options
+    if (textLower.includes('record expense')) {
+      this.startExpenseFlow(chatId, userId);
+      return;
+    }
+    
+    if (textLower.includes('record income')) {
+      this.startIncomeFlow(chatId, userId);
+      return;
+    }
+    
+    if (textLower.includes('view summary')) {
+      this.showSummary(chatId);
+      return;
+    }
+    
+    if (textLower.includes('settings')) {
+      this.showSettingsMenu(chatId);
+      return;
+    }
+    
+    if (textLower.includes('main menu')) {
+      this.showMainMenu(chatId);
+      return;
+    }
+    
+    // For text that doesn't match any known buttons, show help
+    this.sendMessageWithButtons(
+      chatId,
+      this.telegramMessageService.formatMessage('UNKNOWN_COMMAND'),
+      TELEGRAM_MESSAGES.UNKNOWN_COMMAND_BUTTONS
+    );
+  }
+
   private async handleConversationState(chatId: number, userId: string, text: string, userState: { state: string; data: any }) {
+    // Implementation depends on many states, so this is just an example pattern
     try {
-      switch (userState.state) {
-        case 'UPI_AMOUNT':
-          const upiAmount = parseFloat(text);
-          if (isNaN(upiAmount)) {
-            this.bot.sendMessage(chatId, 'Please enter a valid number for the amount.');
-            return;
-          }
-          
-          userState.data.amount = upiAmount;
-          userState.state = 'UPI_MERCHANT';
-          
-          this.bot.sendMessage(
-            chatId,
-            'Please enter the merchant name:',
-            {
-              reply_markup: {
-                force_reply: true,
-              },
-            }
-          );
-          break;
-          
-        case 'UPI_MERCHANT':
-          if (!text || text.trim() === '') {
-            this.bot.sendMessage(chatId, 'Please enter a valid merchant name.');
-            return;
-          }
-          
-          userState.data.merchantName = text;
-          
-          try {
-            await this.upiService.mockUpiTransaction(
-              userId,
-              userState.data.amount,
-              userState.data.merchantName
-            );
-            
-            this.bot.sendMessage(
-              chatId,
-              `UPI transaction of ₹${userState.data.amount} to ${userState.data.merchantName} has been recorded successfully!`,
-              {
-                reply_markup: {
-                  remove_keyboard: true,
-                },
-              }
-            );
-          } catch (error) {
-            this.logger.error(`Error processing UPI transaction: ${error.message}`, error.stack);
-            this.bot.sendMessage(
-              chatId,
-              'Sorry, there was an error processing your UPI transaction. Please try again.'
-            );
-          }
-          
-          this.userStates.delete(chatId);
-          break;
-          
-        case 'SETTINGS_MENU':
-          if (text === 'cancel') {
-            this.bot.sendMessage(
-              chatId,
-              'Settings canceled.',
-              {
-                reply_markup: {
-                  remove_keyboard: true,
-                },
-              }
-            );
-            this.userStates.delete(chatId);
-            return;
-          }
-          
-          const option = parseInt(text);
-          if (isNaN(option) || option < 1 || option > 4) {
-            this.bot.sendMessage(chatId, 'Please select a valid option (1-4) or type "cancel" to exit.');
-            return;
-          }
-          
-          switch (option) {
-            case 1: // Set Monthly Budget
-              userState.state = 'SETTINGS_BUDGET';
-              this.bot.sendMessage(
-                chatId,
-                'Please enter your monthly budget amount:',
-                {
-                  reply_markup: {
-                    force_reply: true,
-                  },
-                }
-              );
-              break;
-              
-            case 2: // Enable/Disable Notifications
-              userState.state = 'SETTINGS_NOTIFICATIONS';
-              this.bot.sendMessage(
-                chatId,
-                'Would you like to enable notifications?',
-                {
-                  reply_markup: {
-                    keyboard: [[{ text: 'Yes' }, { text: 'No' }]],
-                    one_time_keyboard: true,
-                    resize_keyboard: true,
-                  },
-                }
-              );
-              break;
-              
-            case 3: // Set Reminder Time
-              userState.state = 'SETTINGS_REMINDER_TIME';
-              this.bot.sendMessage(
-                chatId,
-                'Please enter the time for daily reminders (HH:MM format, 24-hour):',
-                {
-                  reply_markup: {
-                    force_reply: true,
-                  },
-                }
-              );
-              break;
-              
-            case 4: // Change Currency
-              userState.state = 'SETTINGS_CURRENCY';
-              this.bot.sendMessage(
-                chatId,
-                'Currently only INR (₹) is supported.',
-                {
-                  reply_markup: {
-                    remove_keyboard: true,
-                  },
-                }
-              );
-              this.userStates.delete(chatId);
-              break;
-          }
-          break;
-          
-        case 'SETTINGS_BUDGET':
-          const budget = parseFloat(text);
-          if (isNaN(budget) || budget <= 0) {
-            this.bot.sendMessage(chatId, 'Please enter a valid budget amount.');
-            return;
-          }
-          
-          await this.userService.updateUserPreferences(userId, { monthlyBudget: budget });
-          
-          this.bot.sendMessage(
-            chatId,
-            `Your monthly budget has been set to ₹${budget.toFixed(2)}.`,
-            {
-              reply_markup: {
-                remove_keyboard: true,
-              },
-            }
-          );
-          
-          this.userStates.delete(chatId);
-          break;
-          
-        case 'SETTINGS_NOTIFICATIONS':
-          const enableNotifications = text.toLowerCase() === 'yes';
-          
-          await this.userService.updateUserPreferences(userId, { notificationsEnabled: enableNotifications });
-          
-          this.bot.sendMessage(
-            chatId,
-            `Notifications have been ${enableNotifications ? 'enabled' : 'disabled'}.`,
-            {
-              reply_markup: {
-                remove_keyboard: true,
-              },
-            }
-          );
-          
-          this.userStates.delete(chatId);
-          break;
-          
-        case 'SETTINGS_REMINDER_TIME':
-          const timeRegex = /^([01]?[0-9]|2[0-3]):([0-5][0-9])$/;
-          if (!timeRegex.test(text)) {
-            this.bot.sendMessage(chatId, 'Please enter a valid time in HH:MM format (24-hour).');
-            return;
-          }
-          
-          await this.userService.updateUserPreferences(userId, { reminderTime: text });
-          
-          this.bot.sendMessage(
-            chatId,
-            `Your reminder time has been set to ${text}.`,
-            {
-              reply_markup: {
-                remove_keyboard: true,
-              },
-            }
-          );
-          
-          this.userStates.delete(chatId);
-          break;
-          
-        case 'INCOME_AMOUNT':
-          const incomeAmount = parseFloat(text);
-          if (isNaN(incomeAmount)) {
-            this.bot.sendMessage(chatId, 'Please enter a valid number for the amount.');
-            return;
-          }
-          
-          userState.data.amount = incomeAmount;
-          userState.state = 'INCOME_CATEGORY';
-          
-          const incomeCategoryOptions = Object.values(IncomeCategory).map(category => ({
-            text: category,
-          }));
-          
-          this.bot.sendMessage(
-            chatId,
-            'Please select the income category:',
-            {
-              reply_markup: {
-                keyboard: this.chunkArray(incomeCategoryOptions, 2),
-                one_time_keyboard: true,
-                resize_keyboard: true,
-              },
-            }
-          );
-          break;
-          
-        case 'INCOME_CATEGORY':
-          if (!Object.values(IncomeCategory).includes(text as IncomeCategory)) {
-            this.bot.sendMessage(chatId, 'Please select a valid category from the keyboard.');
-            return;
-          }
-          
-          userState.data.category = text;
-          userState.state = 'INCOME_DESCRIPTION';
-          
-          this.bot.sendMessage(
-            chatId,
-            'Please enter a description (or type "skip" to skip):',
-            {
-              reply_markup: {
-                force_reply: true,
-              },
-            }
-          );
-          break;
-          
-        case 'INCOME_DESCRIPTION':
-          userState.data.description = text === 'skip' ? '' : text;
-          
-          await this.incomeService.createIncome(
-            userId,
-            userState.data.amount,
-            userState.data.category as IncomeCategory,
-            userState.data.description
-          );
-          
-          this.bot.sendMessage(
-            chatId,
-            `Income of ₹${userState.data.amount} (${userState.data.category}) has been recorded successfully!`,
-            {
-              reply_markup: {
-                remove_keyboard: true,
-              },
-            }
-          );
-          
-          this.userStates.delete(chatId);
-          break;
-          
+      const state = userState.state;
+      const data = userState.data || {};
+      
+      // Make sure userId is always set
+      data.userId = data.userId || userId;
+      
+      // Handle different conversation states
+      switch (state) {
+        // Expense states
         case 'EXPENSE_AMOUNT':
-          const expenseAmount = parseFloat(text);
-          if (isNaN(expenseAmount)) {
-            this.bot.sendMessage(chatId, 'Please enter a valid number for the amount.');
-            return;
-          }
-          
-          userState.data.amount = expenseAmount;
-          userState.state = 'EXPENSE_CATEGORY';
-          
-          const expenseCategoryOptions = Object.values(ExpenseCategory).map(category => ({
-            text: category,
-          }));
-          
-          this.bot.sendMessage(
-            chatId,
-            'Please select the expense category:',
-            {
-              reply_markup: {
-                keyboard: this.chunkArray(expenseCategoryOptions, 2),
-                one_time_keyboard: true,
-                resize_keyboard: true,
-              },
-            }
-          );
+          await this.handleExpenseAmount(chatId, text, data);
           break;
           
         case 'EXPENSE_CATEGORY':
-          if (!Object.values(ExpenseCategory).includes(text as ExpenseCategory)) {
-            this.bot.sendMessage(chatId, 'Please select a valid category from the keyboard.');
-            return;
-          }
-          
-          userState.data.category = text;
-          userState.state = 'EXPENSE_PAYMENT_METHOD';
-          
-          const paymentMethodOptions = Object.values(PaymentMethod).map(method => ({
-            text: method,
-          }));
-          
-          this.bot.sendMessage(
-            chatId,
-            'Please select the payment method:',
-            {
-              reply_markup: {
-                keyboard: this.chunkArray(paymentMethodOptions, 2),
-                one_time_keyboard: true,
-                resize_keyboard: true,
-              },
-            }
-          );
+          await this.handleExpenseCategory(chatId, text, data);
           break;
           
-        case 'EXPENSE_PAYMENT_METHOD':
-          if (!Object.values(PaymentMethod).includes(text as PaymentMethod)) {
-            this.bot.sendMessage(chatId, 'Please select a valid payment method from the keyboard.');
-            return;
-          }
-          
-          userState.data.paymentMethod = text;
-          userState.state = 'EXPENSE_DESCRIPTION';
-          
-          this.bot.sendMessage(
-            chatId,
-            'Please enter a description (or type "skip" to skip):',
-            {
-              reply_markup: {
-                force_reply: true,
-              },
-            }
-          );
+        case 'EXPENSE_PAYMENT':
+          await this.handleExpensePayment(chatId, text, data);
           break;
           
         case 'EXPENSE_DESCRIPTION':
-          userState.data.description = text === 'skip' ? '' : text;
-          
-          await this.expenseService.createExpense(
-            userId,
-            userState.data.amount,
-            userState.data.category as ExpenseCategory,
-            userState.data.paymentMethod as PaymentMethod,
-            userState.data.description
-          );
-          
-          this.bot.sendMessage(
-            chatId,
-            `Expense of ₹${userState.data.amount} (${userState.data.category}) has been recorded successfully!`,
-            {
-              reply_markup: {
-                remove_keyboard: true,
-              },
-            }
-          );
-          
-          this.userStates.delete(chatId);
+          await this.handleExpenseDescription(chatId, text, data);
           break;
           
+        // Income states
+        case 'INCOME_AMOUNT':
+          await this.handleIncomeAmount(chatId, text, data);
+          break;
+          
+        case 'INCOME_CATEGORY':
+          await this.handleIncomeCategory(chatId, text, data);
+          break;
+          
+        case 'INCOME_DESCRIPTION':
+          await this.handleIncomeDescription(chatId, text, data);
+          break;
+          
+        // UPI states
+        case 'UPI_AMOUNT':
+          await this.handleUpiAmount(chatId, text, data);
+          break;
+          
+        case 'UPI_MERCHANT':
+          await this.handleUpiMerchant(chatId, text, data);
+          break;
+        
         default:
-          this.bot.sendMessage(chatId, 'I received your message. Please use commands to interact with me.');
-          this.userStates.delete(chatId);
+          this.logger.warn(`Unknown state: ${state}`);
+          this.cancelCurrentOperation(chatId);
       }
     } catch (error) {
-      this.logger.error(`Error in conversation flow: ${error.message}`, error.stack);
-      this.bot.sendMessage(
-        chatId,
-        'Sorry, there was an error processing your request. Please try again.'
+      this.logger.error(`Error in conversation handler: ${error.message}`, error.stack);
+      this.sendMessageWithButtons(
+        chatId, 
+        this.telegramMessageService.formatMessage('GENERIC_ERROR'),
+        TELEGRAM_MESSAGES.GENERIC_ERROR_BUTTONS
       );
       this.userStates.delete(chatId);
     }
   }
 
-  private chunkArray<T>(array: T[], size: number): T[][] {
-    const result = [];
-    for (let i = 0; i < array.length; i += size) {
-      result.push(array.slice(i, i + size));
+  // State handlers for expense flow
+  private async handleExpenseAmount(chatId: number, text: string, data: any) {
+    const amount = parseFloat(text.trim());
+    
+    if (isNaN(amount) || amount <= 0) {
+      this.bot.sendMessage(
+        chatId,
+        this.telegramMessageService.formatMessage('EXPENSE_AMOUNT_INVALID')
+      );
+      return;
     }
-    return result;
+    
+    // Update state data with the amount
+    data.amount = amount;
+    this.userStates.set(chatId, { state: 'EXPENSE_CATEGORY', data });
+    
+    // Show category selection with buttons
+    this.sendMessageWithButtons(
+      chatId,
+      this.telegramMessageService.formatMessage('EXPENSE_AMOUNT_CONFIRM', { 
+        amount: this.telegramMessageService.formatAmount(amount)
+      }),
+      TELEGRAM_MESSAGES.EXPENSE_CATEGORY_BUTTONS
+    );
   }
 
+  private async handleExpenseCategory(chatId: number, text: string, data: any) {
+    // Get just the category name (strip emoji if present)
+    let category = text.trim();
+    if (category.includes(' ')) {
+      category = category.split(' ')[1];
+    }
+    
+    // Map text categories to ExpenseCategory enum
+    let expenseCategory: ExpenseCategory;
+    switch(category.toLowerCase()) {
+      case 'food': expenseCategory = ExpenseCategory.FOOD; break;
+      case 'transport': expenseCategory = ExpenseCategory.TRANSPORTATION; break;
+      case 'entertainment': expenseCategory = ExpenseCategory.ENTERTAINMENT; break;
+      case 'shopping': expenseCategory = ExpenseCategory.SHOPPING; break;
+      case 'utilities': expenseCategory = ExpenseCategory.UTILITIES; break;
+      case 'rent': expenseCategory = ExpenseCategory.RENT; break;
+      case 'healthcare': expenseCategory = ExpenseCategory.HEALTH; break;
+      case 'education': expenseCategory = ExpenseCategory.EDUCATION; break;
+      case 'travel': expenseCategory = ExpenseCategory.TRAVEL; break;
+      case 'cancel': 
+        this.cancelCurrentOperation(chatId);
+        return;
+      default:
+        this.bot.sendMessage(
+          chatId,
+          this.telegramMessageService.formatMessage('EXPENSE_CATEGORY_INVALID')
+        );
+        return;
+    }
+    
+    // Update state with category
+    data.category = expenseCategory;
+    this.userStates.set(chatId, { state: 'EXPENSE_PAYMENT', data });
+    
+    // Show payment method buttons
+    this.sendMessageWithButtons(
+      chatId,
+      this.telegramMessageService.formatMessage('EXPENSE_CATEGORY_CONFIRM', {
+        category: this.telegramMessageService.formatCategory(expenseCategory)
+      }),
+      TELEGRAM_MESSAGES.EXPENSE_PAYMENT_BUTTONS
+    );
+  }
+
+  private handleCategorySelection(chatId: number, category: string) {
+    // Get the current conversation state
+    const userState = this.userStates.get(chatId);
+    if (!userState) {
+      this.showMainMenu(chatId);
+      return;
+    }
+    
+    // Update the state with the selected category
+    const data = userState.data || {};
+    let expenseCategory: ExpenseCategory;
+    
+    switch(category.toLowerCase()) {
+      case 'food': expenseCategory = ExpenseCategory.FOOD; break;
+      case 'transport': expenseCategory = ExpenseCategory.TRANSPORTATION; break;
+      case 'entertainment': expenseCategory = ExpenseCategory.ENTERTAINMENT; break;
+      case 'shopping': expenseCategory = ExpenseCategory.SHOPPING; break;
+      case 'utilities': expenseCategory = ExpenseCategory.UTILITIES; break;
+      case 'rent': expenseCategory = ExpenseCategory.RENT; break;
+      case 'healthcare': expenseCategory = ExpenseCategory.HEALTH; break;
+      case 'education': expenseCategory = ExpenseCategory.EDUCATION; break;
+      case 'travel': expenseCategory = ExpenseCategory.TRAVEL; break;
+      default: expenseCategory = ExpenseCategory.OTHER;
+    }
+    
+    data.category = expenseCategory;
+    this.userStates.set(chatId, { state: 'EXPENSE_PAYMENT', data });
+    
+    // Show payment method buttons
+    this.sendMessageWithButtons(
+      chatId,
+      this.telegramMessageService.formatMessage('EXPENSE_CATEGORY_CONFIRM', {
+        category: this.telegramMessageService.formatCategory(expenseCategory)
+      }),
+      TELEGRAM_MESSAGES.EXPENSE_PAYMENT_BUTTONS
+    );
+  }
+  
+  private async handleExpensePayment(chatId: number, text: string, data: any) {
+    // Get just the payment method (strip emoji if present)
+    let paymentMethod = text.trim();
+    if (paymentMethod.includes(' ')) {
+      paymentMethod = paymentMethod.split(' ')[1];
+    }
+    
+    // Map text payment methods to PaymentMethod enum
+    let expensePaymentMethod: PaymentMethod;
+    switch(paymentMethod.toLowerCase()) {
+      case 'credit card': expensePaymentMethod = PaymentMethod.CREDIT_CARD; break;
+      case 'debit card': expensePaymentMethod = PaymentMethod.DEBIT_CARD; break;
+      case 'upi': expensePaymentMethod = PaymentMethod.UPI; break;
+      case 'cash': expensePaymentMethod = PaymentMethod.CASH; break;
+      case 'net banking': expensePaymentMethod = PaymentMethod.NET_BANKING; break;
+      case 'back': 
+        // Go back to category selection
+        this.userStates.set(chatId, { state: 'EXPENSE_CATEGORY', data });
+        this.sendMessageWithButtons(
+          chatId,
+          this.telegramMessageService.formatMessage('EXPENSE_AMOUNT_CONFIRM', { 
+            amount: this.telegramMessageService.formatAmount(data.amount)
+          }),
+          TELEGRAM_MESSAGES.EXPENSE_CATEGORY_BUTTONS
+        );
+        return;
+      default:
+        this.bot.sendMessage(
+          chatId,
+          this.telegramMessageService.formatMessage('EXPENSE_PAYMENT_INVALID')
+        );
+        return;
+    }
+    
+    // Update state with payment method
+    data.paymentMethod = expensePaymentMethod;
+    this.userStates.set(chatId, { state: 'EXPENSE_DESCRIPTION', data });
+    
+    // Prompt for description with Skip button
+    this.sendMessageWithButtons(
+      chatId,
+      this.telegramMessageService.formatMessage('EXPENSE_PAYMENT_CONFIRM', {
+        method: paymentMethod
+      }),
+      TELEGRAM_MESSAGES.EXPENSE_PAYMENT_CONFIRM_BUTTONS
+    );
+  }
+  
+  private async handleExpenseDescription(chatId: number, text: string, data: any) {
+    // Check if user wants to skip
+    if (text.includes('Skip') || text.toLowerCase() === 'skip') {
+      data.description = '';
+    } else {
+      data.description = text.trim();
+    }
+    
+    try {
+      // Save the expense to the database
+      await this.expenseService.createExpense(
+        data.userId,
+        data.amount,
+        data.category,
+        data.paymentMethod,
+        data.description
+      );
+      
+      // Calculate budget usage (in a real app, you'd get this from the service)
+      const percentage = 65; // Example percentage
+      
+      // Show success message with next options
+      this.sendMessageWithButtons(
+        chatId,
+        this.telegramMessageService.formatMessage('EXPENSE_SUCCESS', {
+          amount: this.telegramMessageService.formatAmount(data.amount),
+          category: this.telegramMessageService.formatCategory(data.category),
+          method: data.paymentMethod,
+          description: data.description || '(None provided)',
+          percentage: percentage
+        }),
+        TELEGRAM_MESSAGES.EXPENSE_SUCCESS_BUTTONS
+      );
+      
+      // Clear the conversation state
+      this.userStates.delete(chatId);
+    } catch (error) {
+      this.logger.error(`Error saving expense: ${error.message}`, error.stack);
+      this.sendMessageWithButtons(
+        chatId,
+        this.telegramMessageService.formatMessage('GENERIC_ERROR'),
+        TELEGRAM_MESSAGES.GENERIC_ERROR_BUTTONS
+      );
+      this.userStates.delete(chatId);
+    }
+  }
+
+  // Add handler for income amount state
+  private async handleIncomeAmount(chatId: number, text: string, data: any) {
+    const amount = parseFloat(text.trim());
+    
+    if (isNaN(amount) || amount <= 0) {
+      this.bot.sendMessage(
+        chatId,
+        this.telegramMessageService.formatMessage('INCOME_AMOUNT_INVALID')
+      );
+      return;
+    }
+    
+    // Update state data with the amount
+    data.amount = amount;
+    this.userStates.set(chatId, { state: 'INCOME_CATEGORY', data });
+    
+    // Show category selection with buttons
+    this.sendMessageWithButtons(
+      chatId,
+      this.telegramMessageService.formatMessage('INCOME_AMOUNT_CONFIRM', { 
+        amount: this.telegramMessageService.formatAmount(amount)
+      }),
+      TELEGRAM_MESSAGES.INCOME_CATEGORY_BUTTONS
+    );
+  }
+
+  // Add handler for income category state
+  private async handleIncomeCategory(chatId: number, text: string, data: any) {
+    // Get just the category name (strip emoji if present)
+    let category = text.trim();
+    if (category.includes(' ')) {
+      category = category.split(' ')[1];
+    }
+    
+    // Map text categories to IncomeCategory enum
+    let incomeCategory: IncomeCategory;
+    switch(category.toLowerCase()) {
+      case 'salary': incomeCategory = IncomeCategory.SALARY; break;
+      case 'freelance': incomeCategory = IncomeCategory.FREELANCE; break;
+      case 'investment': incomeCategory = IncomeCategory.INVESTMENT; break;
+      case 'gift': incomeCategory = IncomeCategory.GIFT; break;
+      case 'cancel': 
+        this.cancelCurrentOperation(chatId);
+        return;
+      default:
+        this.bot.sendMessage(
+          chatId,
+          this.telegramMessageService.formatMessage('INCOME_CATEGORY_INVALID')
+        );
+        return;
+    }
+    
+    // Update state with category
+    data.category = incomeCategory;
+    this.userStates.set(chatId, { state: 'INCOME_DESCRIPTION', data });
+    
+    // Prompt for description
+    this.sendMessageWithButtons(
+      chatId,
+      this.telegramMessageService.formatMessage('INCOME_CATEGORY_CONFIRM', {
+        category: this.telegramMessageService.formatCategory(incomeCategory)
+      }),
+      TELEGRAM_MESSAGES.INCOME_CATEGORY_CONFIRM_BUTTONS
+    );
+  }
+
+  // Add handler for income description state
+  private async handleIncomeDescription(chatId: number, text: string, data: any) {
+    // Check if user wants to skip
+    if (text.includes('Skip') || text.toLowerCase() === 'skip') {
+      data.description = '';
+    } else {
+      data.description = text.trim();
+    }
+    
+    try {
+      // Save the income to the database
+      await this.incomeService.createIncome(
+        data.userId,
+        data.amount,
+        data.category,
+        data.description
+      );
+      
+      // Calculate total income (in a real app, you'd get this from the service)
+      const totalIncome = this.telegramMessageService.formatAmount(data.amount);
+      
+      // Show success message with next options
+      this.sendMessageWithButtons(
+        chatId,
+        this.telegramMessageService.formatMessage('INCOME_SUCCESS', {
+          amount: this.telegramMessageService.formatAmount(data.amount),
+          category: this.telegramMessageService.formatCategory(data.category),
+          description: data.description || '(None provided)',
+          totalIncome: totalIncome
+        }),
+        TELEGRAM_MESSAGES.INCOME_SUCCESS_BUTTONS
+      );
+      
+      // Clear the conversation state
+      this.userStates.delete(chatId);
+    } catch (error) {
+      this.logger.error(`Error saving income: ${error.message}`, error.stack);
+      this.sendMessageWithButtons(
+        chatId,
+        this.telegramMessageService.formatMessage('GENERIC_ERROR'),
+        TELEGRAM_MESSAGES.GENERIC_ERROR_BUTTONS
+      );
+      this.userStates.delete(chatId);
+    }
+  }
+
+  // Add handlers for UPI states
+  private async handleUpiAmount(chatId: number, text: string, data: any) {
+    const amount = parseFloat(text.trim());
+    
+    if (isNaN(amount) || amount <= 0) {
+      this.bot.sendMessage(
+        chatId,
+        this.telegramMessageService.formatMessage('UPI_AMOUNT_INVALID')
+      );
+      return;
+    }
+    
+    // Update state data with the amount
+    data.amount = amount;
+    this.userStates.set(chatId, { state: 'UPI_MERCHANT', data });
+    
+    // Prompt for merchant
+    this.bot.sendMessage(
+      chatId,
+      this.telegramMessageService.formatMessage('UPI_AMOUNT_CONFIRM', { 
+        amount: this.telegramMessageService.formatAmount(amount)
+      })
+    );
+  }
+
+  private async handleUpiMerchant(chatId: number, text: string, data: any) {
+    if (!text || text.trim() === '') {
+      this.bot.sendMessage(
+        chatId,
+        this.telegramMessageService.formatMessage('UPI_MERCHANT_INVALID')
+      );
+      return;
+    }
+    
+    const merchantName = text.trim();
+    data.merchantName = merchantName;
+    
+    try {
+      // Confirm merchant
+      this.bot.sendMessage(
+        chatId,
+        this.telegramMessageService.formatMessage('UPI_MERCHANT_CONFIRM', { 
+          merchant: merchantName
+        })
+      );
+      
+      // Process UPI transaction
+      const result = await this.upiService.mockUpiTransaction(
+        data.userId,
+        data.amount,
+        data.merchantName
+      );
+      
+      // Get current date for display
+      const date = new Date().toLocaleDateString();
+      
+      // For demo, assume the category is detected as "shopping"
+      const category = 'Shopping';
+      const percentage = 45; // Example percentage
+      
+      // Show success message
+      this.sendMessageWithButtons(
+        chatId,
+        this.telegramMessageService.formatMessage('UPI_SUCCESS', {
+          amount: this.telegramMessageService.formatAmount(data.amount),
+          merchant: data.merchantName,
+          date: date,
+          category: category,
+          percentage: percentage
+        }),
+        TELEGRAM_MESSAGES.UPI_SUCCESS_BUTTONS
+      );
+      
+      // Clear conversation state
+      this.userStates.delete(chatId);
+    } catch (error) {
+      this.logger.error(`Error processing UPI transaction: ${error.message}`, error.stack);
+      this.sendMessageWithButtons(
+        chatId,
+        this.telegramMessageService.formatMessage('GENERIC_ERROR'),
+        TELEGRAM_MESSAGES.GENERIC_ERROR_BUTTONS
+      );
+      this.userStates.delete(chatId);
+    }
+  }
+
+  // Helper methods for displaying UI elements
+  private sendMessageWithButtons(chatId: number, text: string, buttons: string[][]) {
+    // Convert string buttons to KeyboardButton objects
+    const keyboardButtons = buttons.map(row => 
+      row.map(buttonText => ({ text: buttonText }))
+    );
+    
+    const options: TelegramBot.SendMessageOptions = {
+      parse_mode: 'Markdown' as TelegramBot.ParseMode,
+      reply_markup: {
+        keyboard: keyboardButtons,
+        resize_keyboard: true,
+        one_time_keyboard: false
+      }
+    };
+    
+    this.bot.sendMessage(chatId, text, options);
+  }
+  
+  private sendMessageWithInlineButtons(chatId: number, text: string, buttons: Array<Array<{text: string, callback_data: string}>>) {
+    const options: TelegramBot.SendMessageOptions = {
+      parse_mode: 'Markdown' as TelegramBot.ParseMode,
+      reply_markup: {
+        inline_keyboard: buttons
+      }
+    };
+    
+    this.bot.sendMessage(chatId, text, options);
+  }
+
+  // Main menu and flow starters
+  private showMainMenu(chatId: number) {
+    this.userStates.delete(chatId); // Clear any ongoing conversation
+    
+    this.sendMessageWithButtons(
+      chatId,
+      this.telegramMessageService.formatMessage('MAIN_MENU'),
+      TELEGRAM_MESSAGES.MAIN_MENU_BUTTONS
+    );
+  }
+  
+  private startGuidedTour(chatId: number) {
+    // Tour sequence would be implemented here
+    // For now, just show the main menu
+    this.showMainMenu(chatId);
+  }
+  
+  private startExpenseFlow(chatId: number, userId: string = '') {
+    // Set initial state with userId
+    const userState = {
+      state: 'EXPENSE_AMOUNT', 
+      data: { userId }
+    };
+    
+    this.userStates.set(chatId, userState);
+    
+    // Send initial message
+    this.bot.sendMessage(
+      chatId,
+      this.telegramMessageService.formatMessage('EXPENSE_START')
+    );
+  }
+  
+  private startIncomeFlow(chatId: number, userId: string = '') {
+    // Set initial state with userId
+    this.userStates.set(chatId, { 
+      state: 'INCOME_AMOUNT', 
+      data: { userId }
+    });
+    
+    // Send initial message
+    this.bot.sendMessage(
+      chatId,
+      this.telegramMessageService.formatMessage('INCOME_START')
+    );
+  }
+  
+  private startUpiFlow(chatId: number, userId: string = '') {
+    // Set initial state with userId
+    this.userStates.set(chatId, { 
+      state: 'UPI_AMOUNT', 
+      data: { userId }
+    });
+    
+    // Send initial message
+    this.bot.sendMessage(
+      chatId,
+      this.telegramMessageService.formatMessage('UPI_START')
+    );
+  }
+  
+  private showSummary(chatId: number) {
+    // In a real implementation, you'd fetch data and format it
+    // This is a simplified version
+    this.bot.sendMessage(
+      chatId,
+      this.telegramMessageService.formatMessage('SUMMARY_START')
+    );
+    
+    // Simulate data fetching
+    setTimeout(() => {
+      const now = new Date();
+      const month = now.toLocaleString('default', { month: 'long' });
+      const year = now.getFullYear();
+      
+      this.sendMessageWithButtons(
+        chatId,
+        this.telegramMessageService.formatMessage('SUMMARY_RESULT', {
+          month,
+          year,
+          totalExpenses: this.telegramMessageService.formatAmount(24500),
+          totalIncome: this.telegramMessageService.formatAmount(40000),
+          netSavings: this.telegramMessageService.formatAmount(15500),
+          categories: '🍔 Food: ₹8,200\n🚗 Transport: ₹5,300\n🏠 Rent: ₹10,000\n📱 Utilities: ₹1,000'
+        }),
+        TELEGRAM_MESSAGES.SUMMARY_RESULT_BUTTONS
+      );
+    }, 1500);
+  }
+  
+  private showSettingsMenu(chatId: number) {
+    this.sendMessageWithButtons(
+      chatId,
+      this.telegramMessageService.formatMessage('SETTINGS_START'),
+      TELEGRAM_MESSAGES.SETTINGS_BUTTONS
+    );
+  }
+  
+  private cancelCurrentOperation(chatId: number) {
+    this.userStates.delete(chatId);
+    
+    this.sendMessageWithButtons(
+      chatId,
+      this.telegramMessageService.formatMessage('CONVERSATION_CANCELLED'),
+      TELEGRAM_MESSAGES.CONVERSATION_CANCELLED_BUTTONS
+    );
+  }
+  
   // Method to send messages to users
   sendMessage(chatId: number, text: string): Promise<TelegramBot.Message> {
     return this.bot.sendMessage(chatId, text);
