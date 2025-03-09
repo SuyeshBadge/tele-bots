@@ -337,6 +337,9 @@ export class UIUXLessonBot {
         });
       }
       
+      // Start the scheduler
+      this.scheduler.start();
+      
       // Start the bot
       await this.bot.api.deleteWebhook();
       await this.bot.start();

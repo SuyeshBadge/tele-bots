@@ -33,22 +33,29 @@ export class Scheduler {
    * Start the scheduler
    */
   public start(): void {
-    logger.info('Starting scheduler');
+    logger.info('Starting scheduler with configuration check');
     
     // Check if scheduled lessons are disabled in development mode
     if (IS_DEV_MODE && DISABLE_DEV_SCHEDULED_LESSONS) {
-      logger.info('Scheduled lessons are disabled in development mode');
+      logger.info('Scheduled lessons are disabled by configuration DISABLE_DEV_SCHEDULED_LESSONS=true');
       return;
     }
     
-    // Schedule lessons every 2 hours
-    // Run at 0 minutes of every even hour (0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22)
-    const job = schedule.scheduleJob('0 */2 * * *', async () => {
+    // Clear any existing jobs
+    this.stop();
+    
+    // Schedule lessons every 3 hours
+    // Run at 0 minutes of every third hour (0, 3, 6, 9, 12, 15, 18, 21)
+    logger.info('Creating job with schedule: 0 */3 * * *');
+    const job = schedule.scheduleJob('0 */3 * * *', async () => {
       const now = new Date();
       const hour = now.getHours();
-      logger.info(`Running scheduled lesson at ${hour}:00`);
+      logger.info(`========================================`);
+      logger.info(`Executing scheduled lesson at ${hour}:00`);
+      logger.info(`========================================`);
       try {
         await this.lessonCallback();
+        logger.info(`Scheduled lesson execution completed successfully at ${new Date().toISOString()}`);
       } catch (error) {
         logger.error(`Error running scheduled lesson: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -62,7 +69,8 @@ export class Scheduler {
       await cleanupExpiredQuizzes();
     });
     
-    logger.info('Scheduler started with 2-hour interval');
+    const nextRun = this.getNextScheduledTime();
+    logger.info(`Scheduler started with 3-hour interval. Next execution: ${nextRun?.toISOString() || 'Unknown'}`);
     
     // For development mode, schedule a test lesson soon
     if (IS_DEV_MODE && !DISABLE_DEV_SCHEDULED_LESSONS) {
