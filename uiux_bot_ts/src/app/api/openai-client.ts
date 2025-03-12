@@ -72,6 +72,7 @@ interface LessonData {
   explanation: string;
   option_explanations?: string[];
   vocabulary_terms?: {term: string, definition: string, example: string}[]; // Array of vocabulary terms with definitions and examples
+  example_link?: {url: string, description: string}; // Link to a real-world example implementation
 }
 
 /**
@@ -124,18 +125,23 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         `   - Each point must be **1-2 concise sentences (max 20 words)** to ensure clarity.\n` +
         `   - Avoid repeating emojis and vary the sentence structures.\n\n` +
         
-        `3️⃣ **Vocabulary Terms** (3-5 total):\n` +
+        `3️⃣ **Real-World Example**:\n` +
+        `   - Provide a URL to a specific, accessible webpage that demonstrates an excellent implementation of this "${theme}" concept.\n` +
+        `   - Add a brief description (max 20 words) explaining what aspects of the example illustrate the concept.\n` +
+        `   - Choose examples from well-known companies or products that clearly showcase the principle in action.\n\n` +
+        
+        `4️⃣ **Vocabulary Terms** (3-5 total):\n` +
         `   - Include key terminology related to the "${theme}" topic.\n` +
         `   - Each term should have a clear, concise definition (max 15 words).\n` +
         `   - Include a short, relatable real-world example for each term (max 15 words).\n` +
         `   - Choose terms that are essential for beginners to understand the topic.\n\n` +
       
-        `4️⃣ **Quiz Question**:\n` +
+        `5️⃣ **Quiz Question**:\n` +
         `   - A multiple-choice question with **exactly 4 answer options**.\n` +
         `   - The question must be **clear, relevant, and beginner-friendly**.\n` +
         `   - Incorrect answers should be **plausible but clearly incorrect** (no trick questions).\n\n` +
       
-        `5️⃣ **Explanations for Each Answer**:\n` +
+        `6️⃣ **Explanations for Each Answer**:\n` +
         `   - Explain why the **correct answer is right** in a clear, friendly way (max 40 words).\n` +
         `   - Explain why each **wrong answer is incorrect** in a simple, non-technical way (max 30 words each).\n\n` +
       
@@ -143,6 +149,7 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         `{\n` +
         `  "title": "string (max 10 words)",\n` +
         `  "content_points": ["string (each must start with a unique emoji, max 20 words)"],\n` +
+        `  "example_link": {"url": "valid URL to a real webpage example", "description": "string (max 20 words)"},\n` +
         `  "vocabulary_terms": [{"term": "string", "definition": "string (max 15 words)", "example": "string (max 15 words)"}],\n` +
         `  "quiz_question": "string",\n` +
         `  "quiz_options": ["string", "string", "string", "string"],\n` +
@@ -156,7 +163,8 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         `- Use **engaging, friendly, and beginner-appropriate language** (avoid jargon and keep it fun!).\n` +
         `- Keep answers **concise, structured, and varied** (no repeated emojis or phrasing).\n` +
         `- Follow **word limits strictly** to maintain readability and consistency.\n` +
-        `- Make vocabulary examples relatable to real design situations that beginners can understand.`
+        `- Make vocabulary examples relatable to real design situations that beginners can understand.\n` +
+        `- For example links, use only reputable, non-paywalled sites that clearly demonstrate the concept.`
       );
       
 
@@ -172,6 +180,8 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         "Do NOT use generic bullet points—always use appropriate emojis that match the topic. " +
         "Include key vocabulary terms that relate to the topic with clear, concise definitions and practical, relatable examples. " +
         "Your examples should illustrate how the terms are applied in real-world design situations that beginners can understand. " +
+        "ALWAYS provide a link to a real, accessible webpage that demonstrates a good implementation of the UI/UX concept being taught. " +
+        "Choose well-known, reputable sites that clearly showcase the principles in action. " +
         "Ensure explanations are clear, concise, and formatted for an engaging learning experience.";
 
       
@@ -262,6 +272,27 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         } else {
           // If vocabulary terms are missing, provide an empty array
           lessonData.vocabulary_terms = [];
+        }
+        
+        // Validate example_link if it exists
+        if (lessonData.example_link) {
+          if (typeof lessonData.example_link !== 'object' || lessonData.example_link === null || 
+              !('url' in lessonData.example_link) || !('description' in lessonData.example_link)) {
+            // If example_link is invalid, provide a default one
+            lessonData.example_link = getExampleLinkForTheme(theme);
+          } else {
+            // Validate URL format
+            try {
+              new URL(lessonData.example_link.url);
+              // URL is valid
+            } catch (error) {
+              // URL is invalid, provide a default
+              lessonData.example_link = getExampleLinkForTheme(theme);
+            }
+          }
+        } else {
+          // If example_link is missing, provide a default
+          lessonData.example_link = getExampleLinkForTheme(theme);
         }
         
         // Add to cache
@@ -369,6 +400,9 @@ function getFallbackLesson(theme: string): LessonData {
     }
   ];
 
+  // Add a real-world example link based on the theme
+  const exampleLink = getExampleLinkForTheme(theme);
+
   return {
     title: `Introduction to ${theme} in UI/UX Design`,
     content,
@@ -378,7 +412,70 @@ function getFallbackLesson(theme: string): LessonData {
     correct_option_index: correctOptionIndex,
     explanation: `Focusing on user needs and expectations is always the most important aspect of any UI/UX design concept. ${theme} should serve the users, not just look impressive or follow trends.`,
     option_explanations: optionExplanations,
-    vocabulary_terms: vocabularyTerms
+    vocabulary_terms: vocabularyTerms,
+    example_link: exampleLink
+  };
+}
+
+/**
+ * Get an appropriate example link based on the theme
+ * @param theme The UI/UX design theme
+ * @returns An example link object with url and description
+ */
+function getExampleLinkForTheme(theme: string): {url: string, description: string} {
+  // Map of themes to appropriate example links
+  const themeExamples: Record<string, {url: string, description: string}> = {
+    "UI/UX Principles": {
+      url: "https://www.airbnb.com",
+      description: "Airbnb uses clear visual hierarchy and intuitive navigation that demonstrates core UI/UX principles."
+    },
+    "Color Theory": {
+      url: "https://stripe.com",
+      description: "Stripe's website demonstrates effective use of color to guide users and create visual hierarchy."
+    },
+    "Typography": {
+      url: "https://medium.com",
+      description: "Medium uses typography expertly to create readable, scannable content with clear hierarchy."
+    },
+    "Visual Hierarchy": {
+      url: "https://www.apple.com",
+      description: "Apple's website exemplifies strong visual hierarchy directing attention to key elements."
+    },
+    "Responsive Design": {
+      url: "https://www.nytimes.com",
+      description: "The New York Times website adapts seamlessly across different device sizes."
+    },
+    "User Research": {
+      url: "https://www.gov.uk",
+      description: "GOV.UK's design is based on extensive user research, creating simple, accessible interfaces."
+    },
+    "Accessibility": {
+      url: "https://www.gov.uk",
+      description: "GOV.UK demonstrates excellent accessibility features following WCAG guidelines."
+    },
+    "Design Systems": {
+      url: "https://material.io",
+      description: "Google's Material Design showcases a comprehensive, consistent design system."
+    },
+    "Navigation Patterns": {
+      url: "https://www.amazon.com",
+      description: "Amazon's complex navigation system handles millions of products while remaining usable."
+    },
+    "Form Design": {
+      url: "https://www.typeform.com",
+      description: "Typeform demonstrates excellent form design with clear, user-friendly interfaces."
+    }
+  };
+  
+  // Check if we have a specific example for this theme
+  if (theme in themeExamples) {
+    return themeExamples[theme];
+  }
+  
+  // If no specific example for this theme, return a default example
+  return {
+    url: "https://www.nngroup.com/articles/",
+    description: `Nielsen Norman Group offers research-backed articles about ${theme} and other UI/UX concepts.`
   };
 }
 
@@ -425,6 +522,11 @@ export async function generateLesson(theme?: string): Promise<LessonSections> {
     } else {
       // Fall back to the content string if content_points is not available
       contentString = lessonData.content;
+    }
+    
+    // Add example link if available
+    if (lessonData.example_link && lessonData.example_link.url) {
+      contentString += `\n\n<b>🔍 Real-World Example:</b>\n<a href="${lessonData.example_link.url}">${lessonData.example_link.url}</a>\n${lessonData.example_link.description}`;
     }
     
     // Format vocabulary terms if available
