@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { TelegramService } from './telegram.service';
 import { ConfigModule } from '@nestjs/config';
 import { ExpenseModule } from '../expense/expense.module';
 import { IncomeModule } from '../income/income.module';
@@ -8,6 +7,7 @@ import { UpiModule } from '../upi/upi.module';
 import { AuthModule } from '../auth/auth.module';
 import { TelegramMessageService } from './telegram.message.service';
 import { MessageModule } from '../common/messages/message.module';
+import { TelegramGramioService } from './telegram-gramio.service';
 
 @Module({
   imports: [
@@ -19,7 +19,10 @@ import { MessageModule } from '../common/messages/message.module';
     AuthModule,
     MessageModule,
   ],
-  providers: [TelegramService, TelegramMessageService],
-  exports: [TelegramService],
+  providers: [
+    TelegramMessageService,
+    TelegramGramioService
+  ],
+  exports: [TelegramGramioService],
 })
 export class TelegramModule {} 

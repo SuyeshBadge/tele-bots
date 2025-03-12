@@ -19,23 +19,101 @@ export class TelegramMessageService {
   formatMessage(messageKey: keyof typeof TELEGRAM_MESSAGES, variables: Record<string, any> = {}): string {
     try {
       const template = TELEGRAM_MESSAGES[messageKey];
-      if (!template) {
-        this.logger.warn(`Message template not found for key: ${messageKey}`);
-        return '';
-      }
       
+      if (!template) {
+        this.logger.warn(`Message template not found: ${messageKey}`);
+        return 'Message not available';
+      }
+
       // Handle both string templates and button arrays
-      if (typeof template === 'string') {
-        return this.messageService.format(template, variables);
-      } else {
-        // Just return an empty string if we accidentally got a button array
+      if (typeof template !== 'string') {
         this.logger.warn(`Template for key ${messageKey} is not a string`);
         return '';
       }
+
+      // Replace all variables in the template
+      let result = template;
+      for (const [key, value] of Object.entries(variables)) {
+        const placeholder = `{${key}}`;
+        result = result.replace(new RegExp(placeholder, 'g'), value?.toString() || '');
+      }
+
+      // Return the message as is - no conversion
+      return result;
     } catch (error) {
-      this.logger.error(`Error formatting telegram message: ${messageKey}`, error);
-      return TELEGRAM_MESSAGES.GENERIC_ERROR;
+      this.logger.error(`Error formatting message: ${error.message}`, error.stack);
+      return 'Error displaying message';
     }
+  }
+
+  /**
+   * Convert markdown syntax to HTML for Telegram
+   * @param text - The markdown text to convert
+   * @returns The HTML formatted text
+   */
+  private markdownToHtml(text: string): string {
+    // Check if text already contains HTML tags - if so, return it as is
+    if (/<[a-z][\s\S]*>/i.test(text)) {
+      return text;
+    }
+    
+    return text
+      // Bold: *text* -> <b>text</b>
+      .replace(/\*(.*?)\*/g, '<b>$1</b>')
+      // Italic: _text_ -> <i>text</i>
+      .replace(/_(.*?)_/g, '<i>$1</i>')
+      // Code: `text` -> <code>text</code>
+      .replace(/`(.*?)`/g, '<code>$1</code>')
+      // Underline: ~text~ -> <u>text</u> (not common but sometimes used)
+      .replace(/~(.*?)~/g, '<u>$1</u>')
+      // Strikethrough: ||text|| -> <s>text</s> (not common but sometimes used)
+      .replace(/\|\|(.*?)\|\|/g, '<s>$1</s>');
+  }
+
+  /**
+   * Get consistent emoji for categories and actions
+   * This ensures we use the same emojis throughout the application
+   * 
+   * @param type - The type of emoji to get (category, action, etc.)
+   * @param key - The key to get the emoji for
+   * @returns The emoji
+   */
+  getEmoji(type: 'category' | 'action' | 'status', key: string): string {
+    const emojiMap = {
+      category: {
+        'Food': '🍔',
+        'Transport': '🚗',
+        'Rent': '🏠',
+        'Shopping': '🛒',
+        'Utilities': '📱',
+        'Entertainment': '🎬',
+        'Healthcare': '💊',
+        'Education': '📚',
+        'Salary': '💼',
+        'Freelance': '💰',
+        'Investment': '📈',
+        'Gift': '🎁',
+        'Other': '📦'
+      },
+      action: {
+        'expense': '💸',
+        'income': '💵',
+        'summary': '📊',
+        'settings': '⚙️',
+        'help': '❓',
+        'cancel': '❌',
+        'success': '✅',
+        'error': '⚠️'
+      },
+      status: {
+        'success': '✅',
+        'error': '❌',
+        'warning': '⚠️',
+        'info': 'ℹ️'
+      }
+    };
+
+    return emojiMap[type]?.[key] || '';
   }
 
   /**
@@ -164,4 +242,9 @@ export class TelegramMessageService {
     
     return text;
   }
-} 
+}
+
+// Telegram Message Service
+// Handles formatting and preparing messages for the Telegram bot
+// IMPORTANT: All message formatting should follow the guidelines in @tele-bot-formatting.md
+// located in the rules directory 

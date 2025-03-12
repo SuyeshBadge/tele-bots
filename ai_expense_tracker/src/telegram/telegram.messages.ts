@@ -6,17 +6,21 @@
  * and clear, friendly instructions.
  */
 
+// Telegram Message Templates
+// Contains all the message templates used by the Telegram bot
+// IMPORTANT: All messages should follow the formatting guidelines in @tele-bot-formatting.md
+// located in the rules directory
+
 export const TELEGRAM_MESSAGES = {
   // Welcome and Onboarding Messages
-  WELCOME: `🎉 *Welcome to your Personal Finance Assistant!*
+  WELCOME: `🎉 *Welcome to AI Expense Tracker!*
 
-I'm here to help you track expenses, manage your budget, and improve your financial health - all through simple conversations!
-
-*What would you like to do?*`,
+I help you track expenses effortlessly. Just use the buttons below:`,
 
   WELCOME_BUTTONS: [
     ['💸 Record Expense', '💵 Record Income'],
-    ['📊 View Summary', '⚙️ Settings']
+    ['📱 Record UPI', '📊 View Summary'],
+    ['⚙️ Settings', '❓ Help']
   ],
 
   HELP: `💁‍♂️ *How I Can Help You*
@@ -32,7 +36,7 @@ I'm designed to make tracking your finances super easy. Here's what I can do:
 
   HELP_BUTTONS: [
     ['💸 Record Expense', '💵 Record Income'],
-    ['📊 View Summary', '⚙️ Settings']
+    ['📊 View Summary', '🏠 Main Menu']
   ],
 
   // Authentication and Authorization
@@ -118,8 +122,6 @@ How did you pay for this?`,
 *Payment:* {method}
 *Description:* {description}
 
-Your {category} budget is now {percentage}% used this month.
-
 *What would you like to do next?*`,
 
   EXPENSE_SUCCESS_BUTTONS: [
@@ -160,8 +162,6 @@ What type of income is this?`,
 *Category:* {category}
 *Description:* {description}
 
-Your total income this month is now {totalIncome}.
-
 *What would you like to do next?*`,
 
   INCOME_SUCCESS_BUTTONS: [
@@ -190,12 +190,14 @@ Examples: "Amazon", "Local Grocery", "Rahul"`,
 
 Processing your payment record...`,
 
+  UPI_CATEGORY_PROMPT: `📋 Please select a category for your transaction with {merchant} for {amount}:`,
+
   UPI_SUCCESS: `🎉 *UPI Payment Recorded!*
 
 *Amount:* {amount}
 *Paid to:* {merchant}
 *Date:* {date}
-*Category:* {category} (best guess)
+*Category:* {category}
 
 *What would you like to do next?*`,
 

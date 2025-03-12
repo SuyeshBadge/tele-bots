@@ -43,7 +43,12 @@ import { MessageModule } from './common/messages/message.module';
     TelegramModule,
     ApiModule,
   ],
-  providers: [JwtService],
+  controllers: [
+    // ... existing controllers ...
+  ],
+  providers: [
+    JwtService,
+  ],
 })
 export class AppModule implements NestModule {
   constructor(

@@ -1,3 +1,10 @@
+// Telegram Bot Service
+// IMPORTANT: Follow the formatting guidelines in @tele-bot-formatting.md for all messages:
+// - Use consistent emojis
+// - Keep messages concise
+// - Use proper markdown formatting
+// - Structure information clearly
+
 import { Injectable, OnModuleInit, Logger, UnauthorizedException } from '@nestjs/common';
 import * as TelegramBot from 'node-telegram-bot-api';
 import { ConfigService } from '@nestjs/config';
@@ -31,6 +38,13 @@ export class TelegramService implements OnModuleInit {
   onModuleInit() {
     const token = this.configService.get('TELEGRAM_BOT_TOKEN');
     const nodeEnv = this.configService.get('NODE_ENV');
+    const useGramIO = this.configService.get('USE_GRAMIO') === 'true';
+    
+    // Skip if GramIO is enabled (use GramIO service instead)
+    if (useGramIO) {
+      this.logger.log('Original TelegramService is disabled because GramIO is enabled.');
+      return;
+    }
     
     // Skip Telegram bot initialization in development mode if token is not valid
     if (nodeEnv === 'development' && (!token || token === 'your_telegram_bot_token_here')) {
@@ -43,8 +57,11 @@ export class TelegramService implements OnModuleInit {
       return;
     }
 
-    this.bot = new TelegramBot(token, { polling: true });
-    this.logger.log('Telegram bot initialized and started polling');
+    // Initialize the bot with polling and parse mode HTML
+    this.bot = new TelegramBot(token, { 
+      polling: true
+    });
+    this.logger.log('Telegram bot initialized and started polling with HTML parse mode');
     
     // Load authorized users from the database
     this.loadAuthorizedUsers();
@@ -258,6 +275,13 @@ export class TelegramService implements OnModuleInit {
             this.telegramMessageService.formatMessage('GUIDED_NEXT_STEP'),
             TELEGRAM_MESSAGES.GUIDED_NEXT_STEP_BUTTONS
           );
+          return;
+        }
+        
+        // Handle UPI category selection
+        if (action.startsWith('upi_category_')) {
+          const category = action.replace('upi_category_', '');
+          this.handleUpiCategorySelection(chatId, category);
           return;
         }
         
@@ -578,6 +602,16 @@ export class TelegramService implements OnModuleInit {
     }
     
     try {
+      // Ensure we have a userId
+      if (!data.userId) {
+        this.logger.warn('No userId found for expense description');
+        this.sendMessage(chatId, 'Unable to create expense: User not identified.');
+        this.cancelCurrentOperation(chatId);
+        return;
+      }
+
+      this.logger.log(`[handleExpenseDescription] Processing description: ${data.description}`);
+      
       // Save the expense to the database
       await this.expenseService.createExpense(
         data.userId,
@@ -587,18 +621,14 @@ export class TelegramService implements OnModuleInit {
         data.description
       );
       
-      // Calculate budget usage (in a real app, you'd get this from the service)
-      const percentage = 65; // Example percentage
-      
-      // Show success message with next options
+      // Show success message with next options - without mock budget data
       this.sendMessageWithButtons(
         chatId,
         this.telegramMessageService.formatMessage('EXPENSE_SUCCESS', {
           amount: this.telegramMessageService.formatAmount(data.amount),
           category: this.telegramMessageService.formatCategory(data.category),
           method: data.paymentMethod,
-          description: data.description || '(None provided)',
-          percentage: percentage
+          description: data.description || '(None provided)'
         }),
         TELEGRAM_MESSAGES.EXPENSE_SUCCESS_BUTTONS
       );
@@ -692,6 +722,16 @@ export class TelegramService implements OnModuleInit {
     }
     
     try {
+      // Ensure we have a userId
+      if (!data.userId) {
+        this.logger.warn('No userId found for income description');
+        this.sendMessage(chatId, 'Unable to create income: User not identified.');
+        this.cancelCurrentOperation(chatId);
+        return;
+      }
+
+      this.logger.log(`[handleIncomeDescription] Processing description: ${data.description}`);
+      
       // Save the income to the database
       await this.incomeService.createIncome(
         data.userId,
@@ -700,17 +740,13 @@ export class TelegramService implements OnModuleInit {
         data.description
       );
       
-      // Calculate total income (in a real app, you'd get this from the service)
-      const totalIncome = this.telegramMessageService.formatAmount(data.amount);
-      
-      // Show success message with next options
+      // Show success message with next options - without mock data
       this.sendMessageWithButtons(
         chatId,
         this.telegramMessageService.formatMessage('INCOME_SUCCESS', {
           amount: this.telegramMessageService.formatAmount(data.amount),
           category: this.telegramMessageService.formatCategory(data.category),
-          description: data.description || '(None provided)',
-          totalIncome: totalIncome
+          description: data.description || '(None provided)'
         }),
         TELEGRAM_MESSAGES.INCOME_SUCCESS_BUTTONS
       );
@@ -754,39 +790,83 @@ export class TelegramService implements OnModuleInit {
   }
 
   private async handleUpiMerchant(chatId: number, text: string, data: any) {
-    if (!text || text.trim() === '') {
-      this.bot.sendMessage(
-        chatId,
-        this.telegramMessageService.formatMessage('UPI_MERCHANT_INVALID')
-      );
-      return;
-    }
-    
-    const merchantName = text.trim();
-    data.merchantName = merchantName;
-    
     try {
-      // Confirm merchant
-      this.bot.sendMessage(
-        chatId,
-        this.telegramMessageService.formatMessage('UPI_MERCHANT_CONFIRM', { 
-          merchant: merchantName
-        })
-      );
+      // Ensure we have a userId
+      if (!data.userId) {
+        this.logger.warn('No userId found for UPI merchant');
+        this.sendMessage(chatId, 'Unable to process UPI transaction: User not identified.');
+        this.cancelCurrentOperation(chatId);
+        return;
+      }
+
+      if (!text || text.trim() === '') {
+        this.sendMessage(
+          chatId,
+          this.telegramMessageService.formatMessage('UPI_MERCHANT_INVALID')
+        );
+        return;
+      }
+
+      const merchantName = text.trim();
+      data.merchantName = merchantName;
       
-      // Process UPI transaction
-      const result = await this.upiService.mockUpiTransaction(
+      this.logger.log(`[handleUpiMerchant] Processing merchant: ${merchantName}`);
+      
+      // Update the state with merchant info
+      this.userStates.set(chatId, { 
+        state: 'UPI_CATEGORY', 
+        data: data 
+      });
+
+      // Ask for category without suggesting any mock detected category
+      const message = this.telegramMessageService.formatMessage('UPI_CATEGORY_PROMPT', {
+        amount: this.telegramMessageService.formatAmount(data.amount),
+        merchant: merchantName
+      });
+      
+      await this.sendMessageWithInlineButtons(chatId, message, [
+        [{ text: '🍔 Food', callback_data: 'upi_category_Food' }, { text: '🛒 Groceries', callback_data: 'upi_category_Groceries' }],
+        [{ text: '🚇 Transport', callback_data: 'upi_category_Transport' }, { text: '🏠 Utilities', callback_data: 'upi_category_Utilities' }],
+        [{ text: '🎬 Entertainment', callback_data: 'upi_category_Entertainment' }, { text: '👚 Shopping', callback_data: 'upi_category_Shopping' }],
+        [{ text: '❓ Other', callback_data: 'upi_category_Other' }]
+      ]);
+    } catch (error) {
+      this.logger.error(`Error handling UPI merchant: ${error.message}`, error.stack);
+      await this.sendMessage(chatId, 'Sorry, there was an error processing your UPI transaction. Please try again.');
+      this.cancelCurrentOperation(chatId);
+    }
+  }
+
+  // Handle UPI category selection
+  private async handleUpiCategorySelection(chatId: number, category: string) {
+    try {
+      const state = this.userStates.get(chatId);
+      if (!state || state.state !== 'UPI_CATEGORY') {
+        return;
+      }
+      
+      const data = state.data;
+      
+      // Ensure userId is present
+      if (!data.userId) {
+        this.logger.warn('No userId found for UPI category selection');
+        this.sendMessage(chatId, 'Unable to process UPI transaction: User not identified.');
+        this.cancelCurrentOperation(chatId);
+        return;
+      }
+      
+      // Create an expense entry for the UPI transaction
+      // We're treating UPI transactions as expenses with a payment method of 'UPI'
+      await this.expenseService.createExpense(
         data.userId,
         data.amount,
-        data.merchantName
+        category as any, // Convert to expected type
+        'UPI' as any, // Convert to expected payment method type
+        `UPI payment to ${data.merchantName}`
       );
       
       // Get current date for display
       const date = new Date().toLocaleDateString();
-      
-      // For demo, assume the category is detected as "shopping"
-      const category = 'Shopping';
-      const percentage = 45; // Example percentage
       
       // Show success message
       this.sendMessageWithButtons(
@@ -795,53 +875,98 @@ export class TelegramService implements OnModuleInit {
           amount: this.telegramMessageService.formatAmount(data.amount),
           merchant: data.merchantName,
           date: date,
-          category: category,
-          percentage: percentage
+          category: category
         }),
         TELEGRAM_MESSAGES.UPI_SUCCESS_BUTTONS
       );
       
-      // Clear conversation state
+      // Clear the conversation state
       this.userStates.delete(chatId);
     } catch (error) {
-      this.logger.error(`Error processing UPI transaction: ${error.message}`, error.stack);
-      this.sendMessageWithButtons(
-        chatId,
-        this.telegramMessageService.formatMessage('GENERIC_ERROR'),
-        TELEGRAM_MESSAGES.GENERIC_ERROR_BUTTONS
-      );
-      this.userStates.delete(chatId);
+      this.logger.error(`Error processing UPI category: ${error.message}`, error.stack);
+      this.sendMessage(chatId, 'Sorry, there was an error processing your UPI transaction. Please try again.');
+      this.cancelCurrentOperation(chatId);
+    }
+  }
+
+  // Method to send messages to users
+  sendMessage(chatId: number, text: string): Promise<TelegramBot.Message> {
+    try {
+      // Convert Markdown-style asterisks to HTML bold tags
+      const formattedText = text.replace(/\*(.*?)\*/g, '<b>$1</b>');
+      
+      const options: any = {
+        parse_mode: 'HTML'
+      };
+      
+      return this.bot.sendMessage(chatId, formattedText, options);
+    } catch (error) {
+      this.logger.error('Error sending message with formatting', error);
+      // Fallback to plain text if formatting fails
+      return this.bot.sendMessage(chatId, text.replace(/\*(.*?)\*/g, '$1'));
     }
   }
 
   // Helper methods for displaying UI elements
   private sendMessageWithButtons(chatId: number, text: string, buttons: string[][]) {
-    // Convert string buttons to KeyboardButton objects
-    const keyboardButtons = buttons.map(row => 
-      row.map(buttonText => ({ text: buttonText }))
-    );
-    
-    const options: TelegramBot.SendMessageOptions = {
-      parse_mode: 'Markdown' as TelegramBot.ParseMode,
-      reply_markup: {
-        keyboard: keyboardButtons,
-        resize_keyboard: true,
-        one_time_keyboard: false
-      }
-    };
-    
-    this.bot.sendMessage(chatId, text, options);
+    try {
+      // Convert string buttons to KeyboardButton objects
+      const keyboardButtons = buttons.map(row => 
+        row.map(buttonText => ({ text: buttonText }))
+      );
+      
+      // Convert Markdown-style asterisks to HTML bold tags
+      const formattedText = text.replace(/\*(.*?)\*/g, '<b>$1</b>');
+      
+      const options: any = {
+        parse_mode: 'HTML',
+        reply_markup: {
+          keyboard: keyboardButtons,
+          resize_keyboard: true,
+          one_time_keyboard: false
+        }
+      };
+      
+      this.bot.sendMessage(chatId, formattedText, options);
+    } catch (error) {
+      this.logger.error('Error sending message with buttons and formatting', error);
+      // Fallback to plain text if formatting fails
+      const keyboardButtons = buttons.map(row => 
+        row.map(buttonText => ({ text: buttonText }))
+      );
+      
+      this.bot.sendMessage(chatId, text.replace(/\*(.*?)\*/g, '$1'), {
+        reply_markup: {
+          keyboard: keyboardButtons,
+          resize_keyboard: true,
+          one_time_keyboard: false
+        }
+      });
+    }
   }
-  
+
   private sendMessageWithInlineButtons(chatId: number, text: string, buttons: Array<Array<{text: string, callback_data: string}>>) {
-    const options: TelegramBot.SendMessageOptions = {
-      parse_mode: 'Markdown' as TelegramBot.ParseMode,
-      reply_markup: {
-        inline_keyboard: buttons
-      }
-    };
-    
-    this.bot.sendMessage(chatId, text, options);
+    try {
+      // Convert Markdown-style asterisks to HTML bold tags
+      const formattedText = text.replace(/\*(.*?)\*/g, '<b>$1</b>');
+      
+      const options: any = {
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: buttons
+        }
+      };
+      
+      this.bot.sendMessage(chatId, formattedText, options);
+    } catch (error) {
+      this.logger.error('Error sending message with inline buttons and formatting', error);
+      // Fallback to plain text if formatting fails
+      this.bot.sendMessage(chatId, text.replace(/\*(.*?)\*/g, '$1'), {
+        reply_markup: {
+          inline_keyboard: buttons
+        }
+      });
+    }
   }
 
   // Main menu and flow starters
@@ -905,33 +1030,131 @@ export class TelegramService implements OnModuleInit {
     );
   }
   
-  private showSummary(chatId: number) {
-    // In a real implementation, you'd fetch data and format it
-    // This is a simplified version
-    this.bot.sendMessage(
-      chatId,
-      this.telegramMessageService.formatMessage('SUMMARY_START')
-    );
-    
-    // Simulate data fetching
-    setTimeout(() => {
+  private async showSummary(chatId: number) {
+    try {
+      // Attempt to fetch data from the database
+      // First, we need to get the user ID for this chat
+      const user = await this.getUserForChat(chatId);
+      
+      if (!user || !user.id) {
+        // Can't find user, so we can't show summary
+        this.sendMessage(chatId, 'Unable to fetch summary: User not identified. Please login first.');
+        return;
+      }
+      
+      // Fetch real expense data
+      const expenses = await this.expenseService.getExpensesByUserId(user.id);
+      
+      // Fetch real income data
+      const incomes = await this.incomeService.getIncomeByUserId(user.id);
+      
+      if ((!expenses || expenses.length === 0) && (!incomes || incomes.length === 0)) {
+        // No data available
+        const message = `📊 *Financial Summary*\n\n` +
+          `I don't have any expense or income data to show yet.\n\n` +
+          `As you continue to track your expenses and income, you'll be able to see a comprehensive summary here.\n\n` +
+          `What would you like to do next?`;
+        
+        this.sendMessageWithButtons(chatId, message, [
+          ['📝 New Expense', '💰 New Income'],
+          ['💸 UPI Transaction', '🏠 Main Menu']
+        ]);
+        return;
+      }
+      
+      // Calculate totals
+      const totalExpenses = expenses.reduce((total, expense) => total + expense.amount, 0);
+      const totalIncome = incomes.reduce((total, income) => total + income.amount, 0);
+      const netSavings = totalIncome - totalExpenses;
+      
+      // Get current month and year
       const now = new Date();
       const month = now.toLocaleString('default', { month: 'long' });
       const year = now.getFullYear();
       
+      // Categorize expenses
+      const categorizedExpenses = this.categorizeExpenses(expenses);
+      const categorySummary = this.formatCategorySummary(categorizedExpenses);
+      
+      // Show the summary with real data
       this.sendMessageWithButtons(
         chatId,
         this.telegramMessageService.formatMessage('SUMMARY_RESULT', {
           month,
           year,
-          totalExpenses: this.telegramMessageService.formatAmount(24500),
-          totalIncome: this.telegramMessageService.formatAmount(40000),
-          netSavings: this.telegramMessageService.formatAmount(15500),
-          categories: '🍔 Food: ₹8,200\n🚗 Transport: ₹5,300\n🏠 Rent: ₹10,000\n📱 Utilities: ₹1,000'
+          totalExpenses: this.telegramMessageService.formatAmount(totalExpenses),
+          totalIncome: this.telegramMessageService.formatAmount(totalIncome),
+          netSavings: this.telegramMessageService.formatAmount(netSavings),
+          categories: categorySummary
         }),
         TELEGRAM_MESSAGES.SUMMARY_RESULT_BUTTONS
       );
-    }, 1500);
+    } catch (error) {
+      this.logger.error(`Error showing summary: ${error.message}`, error.stack);
+      this.sendMessage(chatId, 'Sorry, there was an error fetching your summary. Please try again later.');
+    }
+  }
+  
+  // Helper method to get user for a chat
+  private async getUserForChat(chatId: number): Promise<any> {
+    try {
+      // This requires either storing chat-to-user mapping or using telegram ID as user ID
+      // Simplified approach - check if any authorized user matches this chat
+      for (const telegramId of this.authorizedUsers) {
+        if (telegramId === chatId.toString()) {
+          // Use a generic findOne approach - the service likely has a method to find by ID
+          // or we can use the telegramId directly as userId in some cases
+          return { id: telegramId };
+        }
+      }
+      return null;
+    } catch (error) {
+      this.logger.error(`Error getting user for chat: ${error.message}`, error.stack);
+      return null;
+    }
+  }
+
+  // Helper method to categorize expenses
+  private categorizeExpenses(expenses: any[]): Map<string, number> {
+    const categoryTotals = new Map<string, number>();
+    
+    for (const expense of expenses) {
+      const category = expense.category;
+      const currentTotal = categoryTotals.get(category) || 0;
+      categoryTotals.set(category, currentTotal + expense.amount);
+    }
+    
+    return categoryTotals;
+  }
+
+  // Helper method to format category summary
+  private formatCategorySummary(categoryTotals: Map<string, number>): string {
+    if (categoryTotals.size === 0) {
+      return 'No categories to display';
+    }
+    
+    // Get emoji for categories
+    const categoryEmojis: {[key: string]: string} = {
+      'Food': '🍔',
+      'Transport': '🚗',
+      'Rent': '🏠',
+      'Utilities': '📱',
+      'Entertainment': '🎬',
+      'Shopping': '🛍️',
+      'Healthcare': '🏥',
+      'Education': '📚',
+      'Travel': '✈️',
+      'Other': '📦'
+    };
+    
+    // Format each category
+    let summary = '';
+    for (const [category, total] of categoryTotals.entries()) {
+      const emoji = categoryEmojis[category] || '📌';
+      summary += `${emoji} ${category}: ${this.telegramMessageService.formatAmount(total)}\n`;
+    }
+    
+    return summary;
   }
   
   private showSettingsMenu(chatId: number) {
@@ -950,10 +1173,5 @@ export class TelegramService implements OnModuleInit {
       this.telegramMessageService.formatMessage('CONVERSATION_CANCELLED'),
       TELEGRAM_MESSAGES.CONVERSATION_CANCELLED_BUTTONS
     );
-  }
-  
-  // Method to send messages to users
-  sendMessage(chatId: number, text: string): Promise<TelegramBot.Message> {
-    return this.bot.sendMessage(chatId, text);
   }
 } 

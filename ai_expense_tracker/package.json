@@ -28,6 +28,7 @@
     "@nestjs/throttler": "^3.1.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
+    "gramio": "^0.2.4",
     "helmet": "^6.0.0",
     "mongoose": "^6.9.1",
     "node-telegram-bot-api": "^0.61.0",
