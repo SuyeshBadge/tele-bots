@@ -71,6 +71,7 @@ interface LessonData {
   correct_option_index: number;
   explanation: string;
   option_explanations?: string[];
+  vocabulary_terms?: {term: string, definition: string, example: string}[]; // Array of vocabulary terms with definitions and examples
 }
 
 /**
@@ -122,13 +123,19 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         `   - Each must start with a unique, relevant emoji (🎨 for colors, 🖱️ for interaction, 📱 for mobile, etc.).\n` +
         `   - Each point must be **1-2 concise sentences (max 20 words)** to ensure clarity.\n` +
         `   - Avoid repeating emojis and vary the sentence structures.\n\n` +
+        
+        `3️⃣ **Vocabulary Terms** (3-5 total):\n` +
+        `   - Include key terminology related to the "${theme}" topic.\n` +
+        `   - Each term should have a clear, concise definition (max 15 words).\n` +
+        `   - Include a short, relatable real-world example for each term (max 15 words).\n` +
+        `   - Choose terms that are essential for beginners to understand the topic.\n\n` +
       
-        `3️⃣ **Quiz Question**:\n` +
+        `4️⃣ **Quiz Question**:\n` +
         `   - A multiple-choice question with **exactly 4 answer options**.\n` +
         `   - The question must be **clear, relevant, and beginner-friendly**.\n` +
         `   - Incorrect answers should be **plausible but clearly incorrect** (no trick questions).\n\n` +
       
-        `4️⃣ **Explanations for Each Answer**:\n` +
+        `5️⃣ **Explanations for Each Answer**:\n` +
         `   - Explain why the **correct answer is right** in a clear, friendly way (max 40 words).\n` +
         `   - Explain why each **wrong answer is incorrect** in a simple, non-technical way (max 30 words each).\n\n` +
       
@@ -136,6 +143,7 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         `{\n` +
         `  "title": "string (max 10 words)",\n` +
         `  "content_points": ["string (each must start with a unique emoji, max 20 words)"],\n` +
+        `  "vocabulary_terms": [{"term": "string", "definition": "string (max 15 words)", "example": "string (max 15 words)"}],\n` +
         `  "quiz_question": "string",\n` +
         `  "quiz_options": ["string", "string", "string", "string"],\n` +
         `  "correct_option_index": integer (0-3),\n` +
@@ -147,7 +155,8 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         `- Ensure the response is always **valid JSON** (properly formatted, with no missing brackets or escape errors).\n` +
         `- Use **engaging, friendly, and beginner-appropriate language** (avoid jargon and keep it fun!).\n` +
         `- Keep answers **concise, structured, and varied** (no repeated emojis or phrasing).\n` +
-        `- Follow **word limits strictly** to maintain readability and consistency.`
+        `- Follow **word limits strictly** to maintain readability and consistency.\n` +
+        `- Make vocabulary examples relatable to real design situations that beginners can understand.`
       );
       
 
@@ -161,6 +170,8 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         "Your task is to generate visually appealing, well-structured content that is easy to understand. " +
         "EVERY key learning point MUST start with a unique, relevant emoji (🎨 for colors, 🖱️ for interaction, 📱 for mobile, etc.). " +
         "Do NOT use generic bullet points—always use appropriate emojis that match the topic. " +
+        "Include key vocabulary terms that relate to the topic with clear, concise definitions and practical, relatable examples. " +
+        "Your examples should illustrate how the terms are applied in real-world design situations that beginners can understand. " +
         "Ensure explanations are clear, concise, and formatted for an engaging learning experience.";
 
       
@@ -237,6 +248,20 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
           lessonData.correct_option_index >= lessonData.quiz_options.length
         ) {
           throw new Error(`Invalid correct_option_index: ${lessonData.correct_option_index}`);
+        }
+        
+        // Validate vocabulary terms if they exist
+        if (lessonData.vocabulary_terms) {
+          if (!Array.isArray(lessonData.vocabulary_terms)) {
+            lessonData.vocabulary_terms = []; // Reset to empty array if invalid
+          } else {
+            // Make sure each vocabulary term has both term and definition
+            lessonData.vocabulary_terms = lessonData.vocabulary_terms
+              .filter(item => typeof item === 'object' && item !== null && 'term' in item && 'definition' in item && 'example' in item);
+          }
+        } else {
+          // If vocabulary terms are missing, provide an empty array
+          lessonData.vocabulary_terms = [];
         }
         
         // Add to cache
@@ -319,16 +344,41 @@ function getFallbackLesson(theme: string): LessonData {
     
     "While staying aware of trends is valuable, blindly following them without considering if they serve your specific users' needs can lead to poor design choices. Design trends change frequently, but good user experience principles remain consistent."
   ];
-  
+
+  // Add vocabulary terms related to the theme
+  const vocabularyTerms = [
+    { 
+      term: `${theme}`, 
+      definition: `A key concept in UI/UX design that enhances user experience and interface quality.`, 
+      example: `A checkout flow redesigned using ${theme} principles increased conversion by 20%.` 
+    },
+    { 
+      term: "User feedback", 
+      definition: "Information collected from users about their experience with a product.", 
+      example: "Surveys showing users found the navigation menu confusing led to a redesign." 
+    },
+    { 
+      term: "Iteration", 
+      definition: "The process of repeatedly improving a design based on testing and feedback.", 
+      example: "A design team created five versions of a button before finding the optimal solution." 
+    },
+    { 
+      term: "User-centered design", 
+      definition: "Design approach that prioritizes users' needs in all design decisions.", 
+      example: "Designing a medical app based on interviews with actual healthcare providers." 
+    }
+  ];
+
   return {
-    title: `Understanding ${theme} Basics`,
+    title: `Introduction to ${theme} in UI/UX Design`,
     content,
     content_points: contentPoints,
     quiz_question: `What is the most important consideration when implementing ${theme} in UI/UX design?`,
     quiz_options: quizOptions,
     correct_option_index: correctOptionIndex,
     explanation: `Focusing on user needs and expectations is always the most important aspect of any UI/UX design concept. ${theme} should serve the users, not just look impressive or follow trends.`,
-    option_explanations: optionExplanations
+    option_explanations: optionExplanations,
+    vocabulary_terms: vocabularyTerms
   };
 }
 
@@ -336,9 +386,16 @@ function getFallbackLesson(theme: string): LessonData {
  * Generate a lesson for a UI/UX theme
  * 
  * @param theme - Optional theme for the lesson
- * @returns Formatted lesson content
+ * @returns Lesson content separated by sections
  */
-export async function generateLesson(theme?: string): Promise<string> {
+interface LessonSections {
+  title: string;
+  mainContent: string;
+  vocabulary: string;
+  hasVocabulary: boolean;
+}
+
+export async function generateLesson(theme?: string): Promise<LessonSections> {
   const lessonTheme = theme || getRandomTheme();
   
   try {
@@ -370,20 +427,33 @@ export async function generateLesson(theme?: string): Promise<string> {
       contentString = lessonData.content;
     }
     
-    // Format the content for Telegram with proper structure
-    // Add decorative emojis to title
+    // Format vocabulary terms if available
+    let vocabularyString = '';
+    let hasVocabulary = false;
+    if (Array.isArray(lessonData.vocabulary_terms) && lessonData.vocabulary_terms.length > 0) {
+      vocabularyString = '<b>📚 Key Vocabulary</b>\n\n' + 
+        lessonData.vocabulary_terms
+          .map(item => `<b>${item.term}</b>: ${item.definition}\n<i>Example:</i> ${item.example}`)
+          .join('\n\n');
+      hasVocabulary = true;
+    }
+    
+    // Format the title
     const titleEmojis = ['✨', '🌟', '💫', '🎨', '🖌️', '🎭']; 
     const randomEmoji = titleEmojis[Math.floor(Math.random() * titleEmojis.length)];
-    const formattedContent = `<b>${randomEmoji} ${lessonData.title} ${randomEmoji}</b>\n\n${contentString}`;
+    const formattedTitle = `<b>${randomEmoji} ${lessonData.title} ${randomEmoji}</b>`;
     
-    // Remove any triple backticks that might cause formatting issues
-    const cleanedContent = formattedContent.replace(/```/g, '');
-    
+    // Return the sections separately
     logger.info(`Successfully formatted lesson on theme: ${lessonTheme} with ${
       Array.isArray(lessonData.content_points) ? lessonData.content_points.length : 0
-    } points`);
+    } points and ${hasVocabulary ? lessonData.vocabulary_terms?.length : 0} vocabulary terms`);
     
-    return cleanedContent;
+    return {
+      title: formattedTitle,
+      mainContent: contentString,
+      vocabulary: vocabularyString,
+      hasVocabulary
+    };
   } catch (error) {
     logger.error(`Error generating lesson: ${error instanceof Error ? error.message : String(error)}`);
     throw new Error(`Failed to generate lesson: ${error instanceof Error ? error.message : String(error)}`);

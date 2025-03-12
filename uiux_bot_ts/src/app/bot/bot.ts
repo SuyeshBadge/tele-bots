@@ -168,7 +168,7 @@ export class UIUXLessonBot {
     
     // Generate lesson content
     try {
-      const lessonContent = await generateLesson(theme);
+      const lessonSections = await generateLesson(theme);
       
       // Get an image for the lesson
       let imageUrl = null;
@@ -186,21 +186,53 @@ export class UIUXLessonBot {
       // Send to all subscribers
       for (const subscriber of subscribers) {
         try {
+          // Combine title and main content
+          const mainContentWithTitle = `${sanitizeHtmlForTelegram(lessonSections.title)}\n\n${sanitizeHtmlForTelegram(lessonSections.mainContent)}`;
+          
+          // 1. Send the title and main content with image if available
           if (imageUrl && (imageUrl.startsWith('http://') || imageUrl.startsWith('https://'))) {
-            // Send with image
-            await this.bot.api.sendPhoto(
-              subscriber.id, 
-              imageUrl, 
-              {
-                caption: sanitizeHtmlForTelegram(lessonContent),
-                parse_mode: 'HTML'
-              }
-            );
+            // Check if combined content exceeds Telegram's caption limit (1024 characters)
+            if (mainContentWithTitle.length <= 1024) {
+              // If it fits, send image with combined title and content as caption
+              await this.bot.api.sendPhoto(
+                subscriber.id, 
+                imageUrl, 
+                {
+                  caption: mainContentWithTitle,
+                  parse_mode: 'HTML'
+                }
+              );
+            } else {
+              // If too long, send image with just the title
+              await this.bot.api.sendPhoto(
+                subscriber.id, 
+                imageUrl, 
+                {
+                  caption: sanitizeHtmlForTelegram(lessonSections.title),
+                  parse_mode: 'HTML'
+                }
+              );
+              
+              // Then send the main content separately
+              await this.bot.api.sendMessage(
+                subscriber.id,
+                sanitizeHtmlForTelegram(lessonSections.mainContent),
+                { parse_mode: 'HTML' }
+              );
+            }
           } else {
-            // Send without image
             await this.bot.api.sendMessage(
               subscriber.id,
-              sanitizeHtmlForTelegram(lessonContent),
+              mainContentWithTitle,
+              { parse_mode: 'HTML' }
+            );
+          }
+          
+          // 2. Send vocabulary separately if available
+          if (lessonSections.hasVocabulary) {
+            await this.bot.api.sendMessage(
+              subscriber.id,
+              sanitizeHtmlForTelegram(lessonSections.vocabulary),
               { parse_mode: 'HTML' }
             );
           }

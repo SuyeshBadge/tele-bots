@@ -1012,17 +1012,20 @@ async function sendLesson(ctx: BotContext, userId: number, theme?: string): Prom
       logger.info(`Generating new lesson on theme: ${selectedTheme}`);
       
       // Generate lesson using OpenAI
-      const lessonContent = await openaiClient.generateLesson(selectedTheme);
+      const lessonSections = await openaiClient.generateLesson(selectedTheme);
       
       // Get an image for the lesson
       const imageUrl = await imageManager.getUIUXImage(selectedTheme);
+      
+      // Clean the content for storing in DB (HTML to plain text)
+      const combinedContent = `${lessonSections.title}\n\n${lessonSections.mainContent}${lessonSections.hasVocabulary ? `\n\n📚 Key Vocabulary\n\n${lessonSections.vocabulary.replace(/<[^>]*>/g, '')}` : ''}`;
       
       // Create the lesson
       lesson = {
         id: `lesson-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         theme: selectedTheme,
         title: `UI/UX Lesson: ${selectedTheme}`,
-        content: lessonContent,
+        content: combinedContent,
         createdAt: new Date().toISOString(),
         imageUrl: imageUrl || undefined
       };
@@ -1030,8 +1033,57 @@ async function sendLesson(ctx: BotContext, userId: number, theme?: string): Prom
       // Save the lesson to the database
       await lessonRepository.saveLesson(lesson);
       logger.info(`Created and saved new lesson on theme: ${selectedTheme}`);
+      
+      // Send the lesson
+      // 1. Send the title and main content with image if available
+      const mainContentWithTitle = `${lessonSections.title}\n\n${lessonSections.mainContent}`;
+      
+      if (imageUrl) {
+        // Check if combined content exceeds Telegram's caption limit (1024 characters)
+        if (mainContentWithTitle.length <= 1024) {
+          // If it fits, send image with combined title and content as caption
+          await ctx.replyWithPhoto(imageUrl, { 
+            caption: mainContentWithTitle, 
+            parse_mode: 'HTML' 
+          });
+        } else {
+          // If too long, send image with just the title
+          await ctx.replyWithPhoto(imageUrl, { 
+            caption: lessonSections.title, 
+            parse_mode: 'HTML' 
+          });
+          
+          // Then send the main content separately
+          await ctx.reply(lessonSections.mainContent, { parse_mode: 'HTML' });
+        }
+      } else {
+        await ctx.reply(mainContentWithTitle, { parse_mode: 'HTML' });
+      }
+      
+      // 2. Send vocabulary separately if available
+      if (lessonSections.hasVocabulary) {
+        await ctx.reply(lessonSections.vocabulary, { parse_mode: 'HTML' });
+      }
+      
+      // Track lesson delivery
+      await lessonRepository.trackLessonDelivery(userId, lesson.id);
+      
+      // Update user's lesson count
+      await incrementLessonCount(userId);
+      
+      // Set up quiz to be sent after a delay
+      const contentWordCount = lessonSections.mainContent.split(/\s+/).length;
+      const readingTimeSeconds = calculateReadingTime(contentWordCount);
+      
+      setTimeout(async () => {
+        await sendQuiz(ctx, userId, selectedTheme);
+      }, readingTimeSeconds * 1000);
+      
+      logger.info(`Lesson sent successfully to user ${userId} on theme ${selectedTheme}`);
+      return;
     }
     
+    // For existing lessons, use the old approach
     // Update user's session with the lesson theme
     ctx.session.lastTheme = lesson.theme;
     ctx.session.lastLessonTime = new Date();
@@ -1062,7 +1114,6 @@ async function sendLesson(ctx: BotContext, userId: number, theme?: string): Prom
     }, readingTimeSeconds * 1000);
     
     logger.info(`Lesson sent successfully to user ${userId} on theme ${lesson.theme}`);
-    
   } catch (error) {
     logger.error(`Error sending lesson: ${error instanceof Error ? error.message : String(error)}`);
     await ctx.reply('Sorry, there was an error generating your lesson. Please try again later.');
@@ -1131,8 +1182,11 @@ async function sendQuiz(ctx: BotContext, userId: number, theme: string): Promise
     
     // Convert string options to InputPollOption format and enhance with emojis
     const enhancedOptions = quiz.options.map(option => {
-      // Add emojis based on option type (detect if it's a UI element, principle, or tool)
-      if (/button|nav|menu|modal|sidebar|header|footer/i.test(option)) {
+      if (/color|palette|hue|contrast|saturation/i.test(option)) {
+        return { text: `🎨 ${option}` };
+      } else if (/user|customer|audience|person|client/i.test(option)) {
+        return { text: `👤 ${option}` };
+      } else if (/click|tap|swipe|interaction|navigate/i.test(option)) {
         return { text: `🖱️ ${option}` };
       } else if (/principle|theory|concept|rule|guideline/i.test(option)) {
         return { text: `📚 ${option}` };
