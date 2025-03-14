@@ -10,10 +10,12 @@ import { UserController } from './controllers/user.controller';
 import { UpiController } from './controllers/upi.controller';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { SecurityModule } from '../security/security.module';
 
 @Module({
   imports: [
     AuthModule,
+    SecurityModule,
     ExpenseModule,
     IncomeModule,
     UserModule,

@@ -6,6 +6,9 @@ export class User extends Document {
   @Prop({ required: true, unique: true })
   telegramId: string;
 
+  @Prop({ unique: true, sparse: true })
+  mobileNumber: string;
+
   @Prop()
   firstName: string;
 
@@ -26,6 +29,15 @@ export class User extends Document {
 
   @Prop({ default: false })
   isOnboarded: boolean;
+
+  @Prop()
+  otpCode: string;
+
+  @Prop()
+  otpExpiry: Date;
+
+  @Prop({ default: false })
+  mobileVerified: boolean;
 
   @Prop({ type: Object, default: {} })
   preferences: {

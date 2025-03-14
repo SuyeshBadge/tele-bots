@@ -4,17 +4,32 @@ import { UserService } from '../../user/user.service';
 import { UserDecorator } from '../../decorators/user.decorator';
 import { Public } from '../../decorators/public.decorator';
 import { UpdateUserPreferencesDto, UpdateOnboardingStatusDto } from '../../dto/user.dto';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 
+@ApiTags('users')
+@ApiBearerAuth('JWT-auth')
 @Controller('api/users')
 export class UserController {
   constructor(private readonly userService: UserService) {}
 
+  @ApiOperation({ summary: 'Get the profile of the authenticated user' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns the user profile',
+    type: Object
+  })
   @UseGuards(JwtAuthGuard)
   @Get('profile')
   async getProfile(@UserDecorator() user) {
     return this.userService.getUserById(user.userId);
   }
 
+  @ApiOperation({ summary: 'Update user preferences' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'User preferences have been updated',
+    type: Object
+  })
   @UseGuards(JwtAuthGuard)
   @Put('preferences')
   async updatePreferences(
@@ -27,6 +42,12 @@ export class UserController {
     );
   }
 
+  @ApiOperation({ summary: 'Update user onboarding status' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Onboarding status has been updated',
+    type: Object
+  })
   @UseGuards(JwtAuthGuard)
   @Put('onboarding')
   async updateOnboardingStatus(
@@ -39,6 +60,12 @@ export class UserController {
     );
   }
 
+  @ApiOperation({ summary: 'Public endpoint for user information (for demo purposes)' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns a demo message',
+    type: Object
+  })
   @Public()
   @Get()
   findAll() {

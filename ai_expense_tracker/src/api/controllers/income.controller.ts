@@ -1,27 +1,28 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { IncomeService } from '../../income/income.service';
-import { IncomeCategory } from '../../models/income.model';
 import { UserDecorator } from '../../decorators/user.decorator';
 import { Public } from '../../decorators/public.decorator';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { CreateIncomeDto } from '../../dto/income.dto';
 
+@ApiTags('incomes')
+@ApiBearerAuth('JWT-auth')
 @Controller('api/incomes')
 export class IncomeController {
   constructor(private readonly incomeService: IncomeService) {}
 
+  @ApiOperation({ summary: 'Create a new income entry' })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'The income has been successfully created.',
+    type: Object
+  })
   @UseGuards(JwtAuthGuard)
   @Post()
   async createIncome(
     @UserDecorator() user,
-    @Body() createIncomeDto: {
-      amount: number;
-      category: IncomeCategory;
-      description?: string;
-      date?: Date;
-      isRecurring?: boolean;
-      recurringFrequency?: string;
-      source?: string;
-    },
+    @Body() createIncomeDto: CreateIncomeDto,
   ) {
     return this.incomeService.createIncome(
       user.userId,
@@ -35,12 +36,26 @@ export class IncomeController {
     );
   }
 
+  @ApiOperation({ summary: 'Get all incomes for the authenticated user' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns all incomes for the user',
+    type: Object
+  })
   @UseGuards(JwtAuthGuard)
   @Get()
   async getIncomes(@UserDecorator() user) {
     return this.incomeService.getIncomeByUserId(user.userId);
   }
 
+  @ApiOperation({ summary: 'Get income summary for a specific month' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns income summary for the specified month',
+    type: Object
+  })
+  @ApiQuery({ name: 'month', required: false, type: Number, description: 'Month number (1-12)' })
+  @ApiQuery({ name: 'year', required: false, type: Number, description: 'Year (e.g., 2023)' })
   @UseGuards(JwtAuthGuard)
   @Get('summary')
   async getIncomeSummary(
@@ -77,8 +92,14 @@ export class IncomeController {
     };
   }
 
+  @ApiOperation({ summary: 'Public endpoint to get all incomes (for demo purposes)' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns a demo message',
+    type: Object
+  })
   @Public()
-  @Get()
+  @Get('demo')
   findAll() {
     return { message: 'This endpoint will return all incomes' };
   }

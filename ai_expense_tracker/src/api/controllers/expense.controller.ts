@@ -4,12 +4,21 @@ import { ExpenseService } from '../../expense/expense.service';
 import { ExpenseCategory, PaymentMethod } from '../../models/expense.model';
 import { UserDecorator } from '../../decorators/user.decorator';
 import { Public } from '../../decorators/public.decorator';
-import { CreateExpenseDto } from '../../dto/expense.dto';
+import { CreateExpenseDto, ExpenseFilterDto } from '../../dto/expense.dto';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 
+@ApiTags('expenses')
+@ApiBearerAuth('JWT-auth')
 @Controller('api/expenses')
 export class ExpenseController {
   constructor(private readonly expenseService: ExpenseService) {}
 
+  @ApiOperation({ summary: 'Create a new expense entry' })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'The expense has been successfully created.',
+    type: Object
+  })
   @UseGuards(JwtAuthGuard)
   @Post()
   async createExpense(
@@ -40,12 +49,26 @@ export class ExpenseController {
     );
   }
 
+  @ApiOperation({ summary: 'Get all expenses for the authenticated user' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns all expenses for the user',
+    type: Object
+  })
   @UseGuards(JwtAuthGuard)
   @Get()
   async getExpenses(@UserDecorator() user) {
     return this.expenseService.getExpensesByUserId(user.userId);
   }
 
+  @ApiOperation({ summary: 'Get expense summary for a specific month' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns expense summary for the specified month',
+    type: Object
+  })
+  @ApiQuery({ name: 'month', required: false, type: Number, description: 'Month number (1-12)' })
+  @ApiQuery({ name: 'year', required: false, type: Number, description: 'Year (e.g., 2023)' })
   @UseGuards(JwtAuthGuard)
   @Get('summary')
   async getExpenseSummary(
@@ -82,7 +105,12 @@ export class ExpenseController {
     };
   }
 
-  // This endpoint is marked as public for demonstration
+  @ApiOperation({ summary: 'Public endpoint for expense information (for demo purposes)' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Returns a demo message',
+    type: Object
+  })
   @Public()
   @Get('demo')
   findAll() {

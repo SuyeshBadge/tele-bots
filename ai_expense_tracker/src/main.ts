@@ -7,6 +7,7 @@ import { ResponseFormatInterceptor } from './interceptors/response-format.interc
 import { RequestValidationInterceptor } from './interceptors/request-validation.interceptor';
 import { ValidationExceptionFilter } from './filters/validation-exception.filter';
 import { getLogger } from './utils/logger';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
   const logger = getLogger('Bootstrap');
@@ -44,6 +45,38 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
   });
+
+  // Setup Swagger documentation
+  const config = new DocumentBuilder()
+    .setTitle('AI Expense Tracker API')
+    .setDescription('The API documentation for AI Expense Tracker application')
+    .setVersion('1.0')
+    .addTag('auth', 'Authentication endpoints')
+    .addTag('expense', 'Expense management endpoints')
+    .addTag('user', 'User profile management endpoints')
+    .addBearerAuth(
+      { 
+        type: 'http', 
+        scheme: 'bearer', 
+        bearerFormat: 'JWT',
+        name: 'Authorization',
+        description: 'Enter JWT token',
+        in: 'header'
+      },
+      'JWT-auth', // This is a reference ID used for security definition
+    )
+    .build();
+  
+  // Use 'as any' to bypass TypeScript type checking for the Swagger integration
+  // This is needed due to version incompatibilities between dependencies
+  const document = SwaggerModule.createDocument(app as any, config);
+  SwaggerModule.setup('api/docs', app as any, document, {
+    swaggerOptions: {
+      persistAuthorization: true,
+      tagsSorter: 'alpha',
+      operationsSorter: 'alpha',
+    }
+  });
   
   // Get port from config
   const configService = app.get(ConfigService);
@@ -51,5 +84,6 @@ async function bootstrap() {
   
   await app.listen(port);
   logger.log(`AI Expense Tracker API server started on port ${port}`);
+  logger.log(`Swagger documentation available at http://localhost:${port}/api/docs`);
 }
 bootstrap(); 
