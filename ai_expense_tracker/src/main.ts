@@ -8,9 +8,11 @@ import { RequestValidationInterceptor } from './interceptors/request-validation.
 import { ValidationExceptionFilter } from './filters/validation-exception.filter';
 import { getLogger } from './utils/logger';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { Logger } from '@nestjs/common';
+import { Transport } from '@nestjs/microservices';
 
 async function bootstrap() {
-  const logger = getLogger('Bootstrap');
+  const logger = new Logger('MainApplication');
   const app = await NestFactory.create(AppModule);
   
   // Enable security headers with Helmet
@@ -78,12 +80,26 @@ async function bootstrap() {
     }
   });
   
-  // Get port from config
   const configService = app.get(ConfigService);
-  const port = configService.get('PORT') || 3000;
   
+  // Enable microservice communication
+  app.connectMicroservice({
+    transport: Transport.TCP,
+    options: {
+      host: '0.0.0.0',
+      port: 3002,
+    },
+  });
+  
+  // Start all microservices
+  await app.startAllMicroservices();
+  
+  // Start the HTTP server
+  const port = configService.get('PORT', 3000);
   await app.listen(port);
-  logger.log(`AI Expense Tracker API server started on port ${port}`);
+  
+  logger.log(`Application is running on port ${port}`);
   logger.log(`Swagger documentation available at http://localhost:${port}/api/docs`);
 }
+
 bootstrap(); 
