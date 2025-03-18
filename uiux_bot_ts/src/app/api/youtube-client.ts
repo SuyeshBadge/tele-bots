@@ -30,7 +30,7 @@ type VideoListResult = youtube_v3.Schema$VideoListResponse;
 export async function searchTutorialVideo(theme: string): Promise<YouTubeVideo | null> {
   try {
     // Create a more specific search query for UI/UX tutorials
-    const searchQuery = `${theme} UI UX design tutorial "how to" | "step by step" | "guide" | "tips" | "best practices"`;
+    const searchQuery = `${theme}`;
     
     // Make the API request
     const searchResponse = await youtube.search.list({
@@ -72,6 +72,18 @@ export async function searchTutorialVideo(theme: string): Promise<YouTubeVideo |
       const videoId = item.id?.videoId;
       
       if (!videoId) continue;
+
+      //should have views more than 1000
+      // Note: viewCount is not available in search results, would need separate video details call
+      const videoStatsDetailsResponse = await youtube.videos.list({
+        part: ['statistics'],
+        id: [videoId]
+      } as youtube_v3.Params$Resource$Videos$List);
+
+      const videoStatsDetails = videoStatsDetailsResponse.data.items;
+      const views = videoStatsDetails?.find(v => v.id === videoId)?.statistics?.viewCount;
+      if (!views || parseInt(views) < 1000) continue;
+      
 
       const details = videoDetails?.find(v => v.id === videoId);
       if (!details?.contentDetails?.duration) continue;

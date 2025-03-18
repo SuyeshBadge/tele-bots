@@ -93,7 +93,7 @@ interface QuizData {
  * @param themesToAvoid - Array of themes to avoid generating
  * @returns The generated lesson data
  */
-async function generateLessonContent(themesToAvoid: string[] = []): Promise<LessonData> {
+async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoid: string[] = []): Promise<LessonData> {
   let retryCount = 0;
   const maxRetries = 2; // Reduced from 3 to 2
   
@@ -101,20 +101,19 @@ async function generateLessonContent(themesToAvoid: string[] = []): Promise<Less
     let theme = '';
     try {
       // Generate the prompt for the API call - streamlined for better content
-      const themesToAvoidText = themesToAvoid.length > 0 
-        ? `\n\n⚠️ **Important**: Do NOT generate a lesson on any of these themes as they have been recently covered:\n${themesToAvoid.map(t => `- ${t}`).join('\n')}`
-        : '';
 
       const prompt = (
         `Generate a beginner-friendly UI/UX design lesson with a **clear, engaging structure**. Follow these strict guidelines:\n\n` +
       
         `1️⃣ **Title**: A short, engaging title (max 10 words).\n\n` +
-        `2️⃣ **Theme**: The theme of the lesson (max 10 words).\n\n` +
+        `2️⃣ **Theme**: The theme of the lesson (max 10 words). Strictly avoid generating lessons on these recently covered topics:\n${themesToAvoid.filter(Boolean).map(t => `- ${t}`).join('\n')}\n\n` +
       
         `2️⃣ **Key Learning Points** (5-7 total):\n` +
         `   - Each must start with a unique, relevant emoji (🎨 for colors, 🖱️ for interaction, 📱 for mobile, etc.).\n` +
         `   - Each point must be **1-2 concise sentences (max 20 words)** to ensure clarity.\n` +
         `   - Avoid repeating emojis and vary the sentence structures.\n\n` +
+        `   - Use emojis to make the lesson more engaging and fun.\n\n` +
+        `   - Add a fun fact as a point to make the lesson more engaging.\n\n` +
         
         `3️⃣ **Real-World Example**:\n` +
         `   - Provide a URL to a real website or application that demonstrates this concept in action.\n` +
@@ -130,11 +129,13 @@ async function generateLessonContent(themesToAvoid: string[] = []): Promise<Less
         `5️⃣ **Quiz Question**:\n` +
         `   - A multiple-choice question with **exactly 4 answer options**.\n` +
         `   - The question must be **clear, relevant, and beginner-friendly**.\n` +
-        `   - Incorrect answers should be **plausible but clearly incorrect** (no trick questions).\n\n` +
+        `   - Incorrect answers should be **plausible but clearly incorrect** (no trick questions).\n` +
+        `   - Strictly avoid generating quizzes on any of these recently covered quizzes:\n${quizzesToAvoid.filter(Boolean).map(q => `- ${q}`).join('\n')}\n\n` +
       
         `6️⃣ **Video Topic**:\n` +
         `   - Suggest a specific, focused search query for finding a relevant tutorial video.\n` +
-        `   - The query should be 3-6 words long and highly specific to the lesson topic.\n\n` +
+        `   - The query should be 3-6 words long and highly specific to the lesson topic.\n` +
+        `   - Strictly avoid generating video queries on any of these recently covered themes:\n${themesToAvoid.filter(Boolean).map(t => `- ${t}`).join('\n')}\n\n` +
       
         `7️⃣ **Explanations for Each Answer**:\n` +
         `   - Explain why the **correct answer is right** in a clear, friendly way (max 40 words).\n` +
@@ -161,8 +162,7 @@ async function generateLessonContent(themesToAvoid: string[] = []): Promise<Less
         `- Keep answers **concise, structured, and varied** (no repeated emojis or phrasing).\n` +
         `- Follow **word limits strictly** to maintain readability and consistency.\n` +
         `- Make vocabulary examples relatable to real design situations that beginners can understand.\n` +
-        `- For example links, use real websites or applications that clearly showcase the concept in action. Send the exact URL to the example that is relevant to the lesson except apple.com .` +
-        themesToAvoidText
+        `- For example links, use real websites or applications that clearly showcase the concept in action. Send the exact URL to the example that is relevant to the lesson except apple.com .` 
       );
       
 
@@ -180,15 +180,15 @@ async function generateLessonContent(themesToAvoid: string[] = []): Promise<Less
         "Your examples should illustrate how the terms are applied in real-world design situations that beginners can understand. " +
         "ALWAYS provide a link to a real, accessible webpage that demonstrates a good implementation of the UI/UX concept being taught. " +
         "Choose well-known, reputable sites that clearly showcase the principles in action. " +
+        "Strictly avoid using apple.com as an example link. " +
+        "Strictly follow the response format and guidelines provided. " +
         "Ensure explanations are clear, concise, and formatted for an engaging learning experience.";
 
       
-      // Log if detailed logging is enabled
-      openaiLogger.info(`LESSON SYSTEM PROMPT`, { prompt: systemMessage });
-      openaiLogger.info(`LESSON USER PROMPT`, { prompt: prompt });
+   
       
-      logger.debug(`LESSON SYSTEM PROMPT: ${systemMessage}`);
-      logger.debug(`LESSON USER PROMPT: ${prompt}`);
+      logger.info(`LESSON SYSTEM PROMPT: ${systemMessage}`);
+      logger.info(`LESSON USER PROMPT: ${prompt}`);
       
       const response = await openai.chat.completions.create({
         model: settings.OPENAI_MODEL,
@@ -337,10 +337,10 @@ export interface LessonSections {
   example_link?: {url: string, description: string};
 }
 
-export async function generateLesson(themesToAvoid: string[] = []): Promise<LessonSections> {
+export async function generateLesson(themesToAvoid: string[] = [], quizzesToAvoid: string[] = []): Promise<LessonSections> {
   try {
     // Generate lesson content using OpenAI
-    const lessonData = await generateLessonContent(themesToAvoid);
+    const lessonData = await generateLessonContent(themesToAvoid, quizzesToAvoid);
 
     logger.info(`Lesson ${lessonData.title} ${lessonData.theme}`, {
       lessonData

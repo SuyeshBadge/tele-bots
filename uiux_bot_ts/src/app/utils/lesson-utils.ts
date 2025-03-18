@@ -63,10 +63,11 @@ async function generateNewLesson(): Promise<LessonData | null> {
     
     // Get recent themes from the last month
     const recentThemes = await lessonRepository.getRecentThemes();
+    const recentQuizzes = await lessonRepository.getRecentQuizzes();
     logger.info(`Found ${recentThemes.length} recent themes to avoid`);
     
     // Generate lesson using OpenAI with recent themes to avoid
-    const lessonSections = await openaiClient.generateLesson(recentThemes);
+    const lessonSections = await openaiClient.generateLesson(recentThemes, recentQuizzes);
     
     // Format content
     const formattedContent = formatLessonContent(lessonSections);
@@ -134,12 +135,9 @@ function formatVocabulary(vocabularyTerms: Array<{ term: string; definition: str
  */
 async function sendLessonContent(ctx: BotContext, lesson: LessonData): Promise<void> {
   try {
-    // Send title
-    await ctx.reply(`📚 ${lesson.title}`, { parse_mode: 'HTML' });
-    
-    // Send main content
-    const mainContent = lesson.content
-    await ctx.reply(sanitizeHtmlForTelegram(mainContent), { parse_mode: 'HTML' });
+    // Send title and main content together
+    const formattedContent = `📚 <b>${lesson.title}</b>\n\n${lesson.content}`;
+    await ctx.reply(sanitizeHtmlForTelegram(formattedContent), { parse_mode: 'HTML' });
 
       // Send real world example
       if (lesson.example_link) {
@@ -156,7 +154,10 @@ async function sendLessonContent(ctx: BotContext, lesson: LessonData): Promise<v
     if (lesson.videoQuery) {
       const video = await youtubeClient.searchTutorialVideo(lesson.videoQuery);
       if (video) {
-        await ctx.reply(`🎥 Related Video:\n${video.url}`);
+        await ctx.reply(`🎥 Related Tutorial Video\n\n<b>${video.title}</b>\n\nWatch this helpful video to learn more about ${lesson.theme}:
+          \n<i> Duration: ${video.duration}</i>\n\n${video.url}`, {
+          parse_mode: 'HTML',
+        });
       }
     }
   } catch (error) {

@@ -490,6 +490,36 @@ export class LessonRepository {
       return [];
     }
   }
+
+  /**
+   * Get recent quizzes from lessons created in the last month
+   * @returns Array of unique quizzes
+   */
+  async getRecentQuizzes(): Promise<string[]> {
+    try {
+      const supabase = getSupabaseClient();
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+      
+      const { data, error } = await supabase
+        .from('lessons')
+        .select('quiz_question')
+        .gte('created_at', oneMonthAgo.toISOString())
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        this.logSupabaseError('getRecentQuizzes', error);
+        return [];
+      }
+      
+      // Extract unique quizzes
+      const quizzes = data ? [...new Set(data.map(lesson => lesson.quiz_question))] : [];
+      return quizzes;
+    } catch (error) {
+      this.logSupabaseError('getRecentQuizzes', error);
+      return [];
+    }
+  }
 }
 
 // Export a singleton instance
