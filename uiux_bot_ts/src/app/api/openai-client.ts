@@ -90,14 +90,10 @@ interface QuizData {
 /**
  * Generate lesson content using OpenAI API with caching
  * 
- * @param theme - The theme to generate a lesson for
+ * @param themesToAvoid - Array of themes to avoid generating
  * @returns The generated lesson data
  */
-async function generateLessonContent(): Promise<LessonData> {
-
-  
-
-  
+async function generateLessonContent(themesToAvoid: string[] = []): Promise<LessonData> {
   let retryCount = 0;
   const maxRetries = 2; // Reduced from 3 to 2
   
@@ -105,6 +101,10 @@ async function generateLessonContent(): Promise<LessonData> {
     let theme = '';
     try {
       // Generate the prompt for the API call - streamlined for better content
+      const themesToAvoidText = themesToAvoid.length > 0 
+        ? `\n\n⚠️ **Important**: Do NOT generate a lesson on any of these themes as they have been recently covered:\n${themesToAvoid.map(t => `- ${t}`).join('\n')}`
+        : '';
+
       const prompt = (
         `Generate a beginner-friendly UI/UX design lesson with a **clear, engaging structure**. Follow these strict guidelines:\n\n` +
       
@@ -161,7 +161,8 @@ async function generateLessonContent(): Promise<LessonData> {
         `- Keep answers **concise, structured, and varied** (no repeated emojis or phrasing).\n` +
         `- Follow **word limits strictly** to maintain readability and consistency.\n` +
         `- Make vocabulary examples relatable to real design situations that beginners can understand.\n` +
-        `- For example links, use real websites or applications that clearly showcase the concept in action. Send the exact URL to the example that is relevant to the lesson except apple.com .`
+        `- For example links, use real websites or applications that clearly showcase the concept in action. Send the exact URL to the example that is relevant to the lesson except apple.com .` +
+        themesToAvoidText
       );
       
 
@@ -319,7 +320,7 @@ async function generateLessonContent(): Promise<LessonData> {
 /**
  * Generate a lesson for a UI/UX theme
  * 
- * @param theme - Optional theme for the lesson
+ * @param themesToAvoid - Array of themes to avoid generating
  * @returns Lesson content separated by sections
  */
 export interface LessonSections {
@@ -336,10 +337,10 @@ export interface LessonSections {
   example_link?: {url: string, description: string};
 }
 
-export async function generateLesson(): Promise<LessonSections> {
+export async function generateLesson(themesToAvoid: string[] = []): Promise<LessonSections> {
   try {
     // Generate lesson content using OpenAI
-    const lessonData = await generateLessonContent();
+    const lessonData = await generateLessonContent(themesToAvoid);
 
     logger.info(`Lesson ${lessonData.title} ${lessonData.theme}`, {
       lessonData

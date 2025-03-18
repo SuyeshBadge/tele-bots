@@ -61,9 +61,12 @@ async function generateNewLesson(): Promise<LessonData | null> {
   try {
     logger.info('Generating new lesson');
     
+    // Get recent themes from the last month
+    const recentThemes = await lessonRepository.getRecentThemes();
+    logger.info(`Found ${recentThemes.length} recent themes to avoid`);
     
-    // Generate lesson using OpenAI
-    const lessonSections = await openaiClient.generateLesson();
+    // Generate lesson using OpenAI with recent themes to avoid
+    const lessonSections = await openaiClient.generateLesson(recentThemes);
     
     // Format content
     const formattedContent = formatLessonContent(lessonSections);

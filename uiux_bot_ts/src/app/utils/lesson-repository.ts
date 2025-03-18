@@ -460,6 +460,36 @@ export class LessonRepository {
       return [];
     }
   }
+  
+  /**
+   * Get themes from lessons created in the last month
+   * @returns Array of unique themes
+   */
+  async getRecentThemes(): Promise<string[]> {
+    try {
+      const supabase = getSupabaseClient();
+      const oneMonthAgo = new Date();
+      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+      
+      const { data, error } = await supabase
+        .from('lessons')
+        .select('theme')
+        .gte('created_at', oneMonthAgo.toISOString())
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        this.logSupabaseError('getRecentThemes', error);
+        return [];
+      }
+      
+      // Extract unique themes
+      const themes = data ? [...new Set(data.map(lesson => lesson.theme))] : [];
+      return themes;
+    } catch (error) {
+      this.logSupabaseError('getRecentThemes', error);
+      return [];
+    }
+  }
 }
 
 // Export a singleton instance
