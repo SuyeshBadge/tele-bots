@@ -5,7 +5,26 @@
  * which use camelCase and a more normalized structure than the raw Telegram API.
  */
 import { Bot, Context } from 'gramio';
-import type { TelegramMessage, TelegramUser as GramioTelegramUser, TelegramCallbackQuery, TelegramUpdate } from '@gramio/types';
+import type { 
+  TelegramMessage as GramioTelegramMessage, 
+  TelegramUser as GramioTelegramUser, 
+  TelegramCallbackQuery as GramioTelegramCallbackQuery, 
+  TelegramUpdate as GramioTelegramUpdate,
+  TelegramChat as GramioTelegramChat,
+  TelegramMessageEntity as GramioTelegramMessageEntity,
+  TelegramInlineKeyboardMarkup,
+  TelegramKeyboardButton as GramioTelegramKeyboardButton,
+  TelegramInlineKeyboardButton as GramioTelegramInlineKeyboardButton,
+  TelegramLoginUrl as GramioTelegramLoginUrl,
+  TelegramCallbackGame as GramioTelegramCallbackGame,
+  TelegramPhotoSize as GramioTelegramPhotoSize,
+  TelegramDocument as GramioTelegramDocument,
+  TelegramVideo as GramioTelegramVideo,
+  TelegramAudio as GramioTelegramAudio,
+  TelegramSticker as GramioTelegramSticker,
+  TelegramLocation as GramioTelegramLocation,
+  TelegramMaskPosition as GramioTelegramMaskPosition
+} from '@gramio/types';
 
 /**
  * Reference to GramIO's Bot Context type
@@ -16,43 +35,24 @@ export type GramioContext = Context<Bot>;
 /**
  * User object as represented in GramIO
  */
-export interface TelegramUser {
-  id: number;
-  first_name: string;
-  last_name?: string;
-  username?: string;
-  language_code?: string;
-}
+export interface TelegramUser extends GramioTelegramUser {}
 
 /**
  * Chat object as represented in GramIO
  */
-export interface Chat {
-  id: number;
-  type: 'private' | 'group' | 'supergroup' | 'channel';
-  title?: string;
-  username?: string;
-  first_name?: string;
-  last_name?: string;
-  is_forum?: boolean;
-}
+export interface Chat extends GramioTelegramChat {}
 
 /**
  * Message interface as represented in GramIO
  */
-export interface Message {
-  message_id: number;
-  from: TelegramUser;
-  date: number;
-  chat: Chat;
-}
+export interface Message extends GramioTelegramMessage {}
 
 /**
  * Message options for sending messages
  */
 export interface MessageOptions {
   parse_mode?: 'Markdown' | 'HTML';
-  reply_markup?: ReplyMarkup;
+  reply_markup?: TelegramInlineKeyboardMarkup;
   reply_to_message_id?: number;
   disable_notification?: boolean;
   protect_content?: boolean;
@@ -63,7 +63,7 @@ export interface MessageOptions {
  */
 export interface EditMessageOptions {
   parse_mode?: 'Markdown' | 'HTML';
-  reply_markup?: ReplyMarkup;
+  reply_markup?: TelegramInlineKeyboardMarkup;
   disable_web_page_preview?: boolean;
 }
 
@@ -80,40 +80,17 @@ export interface AnswerCallbackQueryOptions {
 /**
  * Reply markup interface
  */
-export interface ReplyMarkup {
-  keyboard?: KeyboardButton[][];
-  inline_keyboard?: InlineKeyboardButton[][];
-  resize_keyboard?: boolean;
-  one_time_keyboard?: boolean;
-  selective?: boolean;
-  remove_keyboard?: boolean;
-}
+export interface ReplyMarkup extends TelegramInlineKeyboardMarkup {}
 
 /**
  * Keyboard button interface
  */
-export interface KeyboardButton {
-  text: string;
-  request_contact?: boolean;
-  request_location?: boolean;
-  request_poll?: KeyboardButtonPollType;
-  web_app?: WebAppInfo;
-}
+export interface KeyboardButton extends GramioTelegramKeyboardButton {}
 
 /**
  * Inline keyboard button interface
  */
-export interface InlineKeyboardButton {
-  text: string;
-  url?: string;
-  callback_data?: string;
-  web_app?: WebAppInfo;
-  login_url?: LoginUrl;
-  switch_inline_query?: string;
-  switch_inline_query_current_chat?: string;
-  callback_game?: CallbackGame;
-  pay?: boolean;
-}
+export interface InlineKeyboardButton extends GramioTelegramInlineKeyboardButton {}
 
 /**
  * Keyboard button poll type interface
@@ -132,17 +109,12 @@ export interface WebAppInfo {
 /**
  * Login URL interface
  */
-export interface LoginUrl {
-  url: string;
-  forward_text?: string;
-  bot_username?: string;
-  request_write_access?: boolean;
-}
+export interface LoginUrl extends GramioTelegramLoginUrl {}
 
 /**
  * Callback game interface
  */
-export interface CallbackGame {}
+export interface CallbackGame extends GramioTelegramCallbackGame {}
 
 /**
  * Base context interface shared across all context types
@@ -173,25 +145,22 @@ export interface BaseContext extends Context<Bot> {
 export interface MessageContext extends BaseContext {
   text?: string;
   caption?: string;
-  photo?: PhotoSize[];
-  document?: Document;
-  video?: Video;
-  audio?: Audio;
-  sticker?: Sticker;
-  location?: Location;
+  photo?: GramioTelegramPhotoSize[];
+  document?: GramioTelegramDocument;
+  video?: GramioTelegramVideo;
+  audio?: GramioTelegramAudio;
+  sticker?: GramioTelegramSticker;
+  location?: GramioTelegramLocation;
 }
 
 /**
  * Callback query context in GramIO
  */
 export interface CallbackQueryContext extends BaseContext {
-  callbackQuery: {
-    id: string;
-    data?: string;
-    queryPayload?: string;
-    from: TelegramUser;
-    message?: Message;
+  update: GramioTelegramUpdate & {
+    callback_query: GramioTelegramCallbackQuery;
   };
+  callbackQuery: GramioTelegramCallbackQuery;
 }
 
 /**
@@ -203,7 +172,7 @@ export type BotContext = MessageContext | CallbackQueryContext;
  * Type guard to check if context is a callback query context
  */
 export function isCallbackQueryContext(ctx: BotContext): ctx is CallbackQueryContext {
-  return 'callbackQuery' in ctx && ctx.callbackQuery !== undefined;
+  return 'update' in ctx && 'callback_query' in ctx.update;
 }
 
 /**
@@ -216,94 +185,37 @@ export function isMessageContext(ctx: BotContext): ctx is MessageContext {
 /**
  * Photo size interface
  */
-export interface PhotoSize {
-  file_id: string;
-  file_unique_id: string;
-  width: number;
-  height: number;
-  file_size?: number;
-}
+export interface PhotoSize extends GramioTelegramPhotoSize {}
 
 /**
  * Document interface
  */
-export interface Document {
-  file_id: string;
-  file_unique_id: string;
-  thumb?: PhotoSize;
-  file_name?: string;
-  mime_type?: string;
-  file_size?: number;
-}
+export interface Document extends GramioTelegramDocument {}
 
 /**
  * Video interface
  */
-export interface Video {
-  file_id: string;
-  file_unique_id: string;
-  width: number;
-  height: number;
-  duration: number;
-  thumb?: PhotoSize;
-  file_name?: string;
-  mime_type?: string;
-  file_size?: number;
-}
+export interface Video extends GramioTelegramVideo {}
 
 /**
  * Audio interface
  */
-export interface Audio {
-  file_id: string;
-  file_unique_id: string;
-  duration: number;
-  performer?: string;
-  title?: string;
-  file_name?: string;
-  mime_type?: string;
-  file_size?: number;
-  thumb?: PhotoSize;
-}
+export interface Audio extends GramioTelegramAudio {}
 
 /**
  * Sticker interface
  */
-export interface Sticker {
-  file_id: string;
-  file_unique_id: string;
-  width: number;
-  height: number;
-  is_animated: boolean;
-  is_video: boolean;
-  thumb?: PhotoSize;
-  emoji?: string;
-  set_name?: string;
-  mask_position?: MaskPosition;
-  file_size?: number;
-}
+export interface Sticker extends GramioTelegramSticker {}
 
 /**
  * Location interface
  */
-export interface Location {
-  latitude: number;
-  longitude: number;
-  horizontal_accuracy?: number;
-  live_period?: number;
-  heading?: number;
-  proximity_alert_radius?: number;
-}
+export interface Location extends GramioTelegramLocation {}
 
 /**
  * Mask position interface
  */
-export interface MaskPosition {
-  point: 'forehead' | 'eyes' | 'mouth' | 'chin';
-  x_shift: number;
-  y_shift: number;
-  scale: number;
-}
+export interface MaskPosition extends GramioTelegramMaskPosition {}
 
 /**
  * Callback action type
