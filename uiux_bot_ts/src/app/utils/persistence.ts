@@ -363,6 +363,57 @@ export async function getHealthStatus(): Promise<HealthStatus | null> {
       error = healthResult.error;
     }
     
+    // If no data exists, create a default health status
+    if (!data) {
+      const defaultHealth: HealthStatus = {
+        lastCheckTime: new Date().toISOString(),
+        isHealthy: true,
+        subscribers: 0,
+        totalLessonsDelivered: 0,
+        totalQuizzes: 0,
+        startupTime: new Date().toISOString(),
+        version: '1.0.0'
+      };
+      
+      // Try to insert into health_status first
+      const insertResult = await supabase
+        .from('health_status')
+        .insert([{
+          id: 1,
+          last_check_time: defaultHealth.lastCheckTime,
+          is_healthy: defaultHealth.isHealthy,
+          subscribers: defaultHealth.subscribers,
+          total_lessons_delivered: defaultHealth.totalLessonsDelivered,
+          total_quizzes: defaultHealth.totalQuizzes,
+          startup_time: defaultHealth.startupTime,
+          version: defaultHealth.version
+        }])
+        .select()
+        .single();
+      
+      if (!insertResult.error) {
+        data = insertResult.data;
+      } else {
+        // If health_status insert failed, try health table
+        const healthInsertResult = await supabase
+          .from('health')
+          .insert([{
+            last_check_time: defaultHealth.lastCheckTime,
+            is_healthy: defaultHealth.isHealthy,
+            subscribers: defaultHealth.subscribers,
+            total_lessons_delivered: defaultHealth.totalLessonsDelivered,
+            total_quizzes: defaultHealth.totalQuizzes,
+            startup_time: defaultHealth.startupTime,
+            version: defaultHealth.version
+          }])
+          .select()
+          .single();
+        
+        data = healthInsertResult.data;
+        error = healthInsertResult.error;
+      }
+    }
+    
     if (error) {
       logSupabaseError('getHealthStatus', error);
       return null;
