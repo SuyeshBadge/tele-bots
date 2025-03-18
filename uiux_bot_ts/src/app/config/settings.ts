@@ -81,6 +81,9 @@ export const settings = {
   
   // Environment information
   NODE_ENV: env.NODE_ENV,
+  
+  // YouTube API key
+  YOUTUBE_API_KEY: process.env.YOUTUBE_API_KEY || '',
 };
 
 // Derived settings

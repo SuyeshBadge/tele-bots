@@ -82,7 +82,7 @@ export class Scheduler {
         } catch (error) {
           logger.error(`Error running test lesson: ${error instanceof Error ? error.message : String(error)}`);
         }
-      }, 10000);
+      }, 1000230);
     }
   }
 

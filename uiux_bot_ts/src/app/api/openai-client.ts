@@ -73,6 +73,7 @@ interface LessonData {
   option_explanations?: string[];
   vocabulary_terms?: {term: string, definition: string, example: string}[]; // Array of vocabulary terms with definitions and examples
   example_link?: {url: string, description: string}; // Link to a real-world example implementation
+  video_link?: {url: string, title: string, description: string}; // Link to a relevant YouTube tutorial video
 }
 
 /**
@@ -116,7 +117,7 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
     try {
       // Generate the prompt for the API call - streamlined for better content
       const prompt = (
-        `Generate a beginner-friendly UI/UX design lesson on "${theme}" with a **clear, engaging structure**. Follow these strict guidelines:\n\n` +
+        `Generate a beginner-friendly UI/UX design lesson with a **clear, engaging structure**. Follow these strict guidelines:\n\n` +
       
         `1️⃣ **Title**: A short, engaging title (max 10 words).\n\n` +
       
@@ -126,12 +127,12 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         `   - Avoid repeating emojis and vary the sentence structures.\n\n` +
         
         `3️⃣ **Real-World Example**:\n` +
-        `   - Provide a URL to a specific, accessible webpage that demonstrates an excellent implementation of this "${theme}" concept.\n` +
-        `   - Add a brief description (max 20 words) explaining what aspects of the example illustrate the concept.\n` +
-        `   - Choose examples from well-known companies or products that clearly showcase the principle in action.\n\n` +
+        `   - Provide a URL to a real website or application that demonstrates this concept in action.\n` +
+        `   - Add a brief description (max 20 words) explaining why this example is relevant.\n` +
+        `   - Choose well-known, reputable sites that clearly showcase the principles.\n\n` +
         
         `4️⃣ **Vocabulary Terms** (3-5 total):\n` +
-        `   - Include key terminology related to the "${theme}" topic.\n` +
+        `   - Include key terminology related to the topic.\n` +
         `   - Each term should have a clear, concise definition (max 15 words).\n` +
         `   - Include a short, relatable real-world example for each term (max 15 words).\n` +
         `   - Choose terms that are essential for beginners to understand the topic.\n\n` +
@@ -149,7 +150,7 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         `{\n` +
         `  "title": "string (max 10 words)",\n` +
         `  "content_points": ["string (each must start with a unique emoji, max 20 words)"],\n` +
-        `  "example_link": {"url": "valid URL to a real webpage example", "description": "string (max 20 words)"},\n` +
+        `  "example_link": {"url": "valid URL", "description": "string (max 20 words)"},\n` +
         `  "vocabulary_terms": [{"term": "string", "definition": "string (max 15 words)", "example": "string (max 15 words)"}],\n` +
         `  "quiz_question": "string",\n` +
         `  "quiz_options": ["string", "string", "string", "string"],\n` +
@@ -164,7 +165,7 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         `- Keep answers **concise, structured, and varied** (no repeated emojis or phrasing).\n` +
         `- Follow **word limits strictly** to maintain readability and consistency.\n` +
         `- Make vocabulary examples relatable to real design situations that beginners can understand.\n` +
-        `- For example links, use only reputable, non-paywalled sites that clearly demonstrate the concept.`
+        `- For example links, use real websites or applications that clearly showcase the concept in action.`
       );
       
 
@@ -490,6 +491,10 @@ interface LessonSections {
   mainContent: string;
   vocabulary: string;
   hasVocabulary: boolean;
+  videoUrl?: string;
+  videoTitle?: string;
+  videoDescription?: string;
+  example_link?: {url: string, description: string};
 }
 
 export async function generateLesson(theme?: string): Promise<LessonSections> {
@@ -525,8 +530,13 @@ export async function generateLesson(theme?: string): Promise<LessonSections> {
     }
     
     // Add example link if available
-    if (lessonData.example_link && lessonData.example_link.url) {
+    if (lessonData.example_link) {
       contentString += `\n\n<b>🔍 Real-World Example:</b>\n<a href="${lessonData.example_link.url}">${lessonData.example_link.url}</a>\n${lessonData.example_link.description}`;
+    }
+    
+    // Add video link if available
+    if (lessonData.video_link) {
+      contentString += `\n\n<b>🎥 Watch & Learn:</b>\n<a href="${lessonData.video_link.url}">${lessonData.video_link.title}</a>\n${lessonData.video_link.description}`;
     }
     
     // Format vocabulary terms if available
@@ -554,7 +564,11 @@ export async function generateLesson(theme?: string): Promise<LessonSections> {
       title: formattedTitle,
       mainContent: contentString,
       vocabulary: vocabularyString,
-      hasVocabulary
+      hasVocabulary,
+      videoUrl: lessonData.video_link?.url,
+      videoTitle: lessonData.video_link?.title,
+      videoDescription: lessonData.video_link?.description,
+      example_link: lessonData.example_link
     };
   } catch (error) {
     logger.error(`Error generating lesson: ${error instanceof Error ? error.message : String(error)}`);

@@ -31,6 +31,7 @@ import {
 import fs from 'fs';
 import { quizRepository, QuizData as PersistentQuizData } from '../utils/quiz-repository';
 import { lessonRepository, LessonData } from '../utils/lesson-repository';
+import * as youtubeClient from '../api/youtube-client';
 
 // Configure logger
 const logger = getChildLogger('handlers');
@@ -61,6 +62,18 @@ interface QuizData extends Omit<PersistentQuizData, 'pollId' | 'createdAt' | 'ex
   option_explanations?: string[]; 
   lessonId: string;
   quizId: string;
+}
+
+// Define LessonSections interface
+interface LessonSections {
+  title: string;
+  mainContent: string;
+  vocabulary: string;
+  hasVocabulary: boolean;
+  videoUrl?: string;
+  videoTitle?: string;
+  videoDescription?: string;
+  example_link?: {url: string, description: string};
 }
 
 // Direct database access version of activeQuizzes
@@ -1035,32 +1048,30 @@ async function sendLesson(ctx: BotContext, userId: number, theme?: string): Prom
       logger.info(`Created and saved new lesson on theme: ${selectedTheme}`);
       
       // Send the lesson
-      // 1. Send the title and main content with image if available
+      // 1. Send the title and main content
       const mainContentWithTitle = `${lessonSections.title}\n\n${lessonSections.mainContent}`;
       
-      if (imageUrl) {
-        // Check if combined content exceeds Telegram's caption limit (1024 characters)
-        if (mainContentWithTitle.length <= 1024) {
-          // If it fits, send image with combined title and content as caption
-          await ctx.replyWithPhoto(imageUrl, { 
-            caption: mainContentWithTitle, 
-            parse_mode: 'HTML' 
-          });
-        } else {
-          // If too long, send image with just the title
-          await ctx.replyWithPhoto(imageUrl, { 
-            caption: lessonSections.title, 
-            parse_mode: 'HTML' 
-          });
-          
-          // Then send the main content separately
-          await ctx.reply(lessonSections.mainContent, { parse_mode: 'HTML' });
-        }
-      } else {
-        await ctx.reply(mainContentWithTitle, { parse_mode: 'HTML' });
+      // Send the main content first
+      await ctx.reply(mainContentWithTitle, { parse_mode: 'HTML' });
+      
+      // 2. Send example link if available
+      if (lessonSections.example_link) {
+        const exampleMessage = `🔍 *Real-World Example*\n\n${lessonSections.example_link.description}\n\n${lessonSections.example_link.url}`;
+        await ctx.reply(exampleMessage, { parse_mode: 'Markdown' });
       }
       
-      // 2. Send vocabulary separately if available
+      // 3. Find and send a relevant tutorial video
+      const video = await youtubeClient.searchTutorialVideo(selectedTheme);
+      if (video) {
+        // Format video message for inline playback
+        const videoMessage = `🎥 *Watch & Learn: ${video.title}*\n\n${video.description}\n\n⏱️ Duration: ${video.duration}\n\n${video.url}`;
+        await ctx.reply(videoMessage, { 
+          parse_mode: 'Markdown',
+          disable_web_page_preview: false
+        } as any); // Type assertion needed for Telegram API options
+      }
+      
+      // 4. Send vocabulary separately if available
       if (lessonSections.hasVocabulary) {
         await ctx.reply(lessonSections.vocabulary, { parse_mode: 'HTML' });
       }
@@ -1094,7 +1105,11 @@ async function sendLesson(ctx: BotContext, userId: number, theme?: string): Prom
     
     // Send the lesson
     if (lesson.imageUrl) {
-      await ctx.replyWithPhoto(lesson.imageUrl, { caption: formattedContent, parse_mode: 'Markdown' });
+      const truncatedContent = truncateCaption(formattedContent);
+      await ctx.replyWithPhoto(lesson.imageUrl, { 
+        caption: truncatedContent, 
+        parse_mode: 'Markdown' 
+      });
     } else {
       await ctx.reply(formattedContent, { parse_mode: 'Markdown' });
     }
@@ -1549,4 +1564,29 @@ function formatLessonContent(response: any): string {
   
   // Default empty string
   return '';
+}
+
+/**
+ * Truncate text to fit Telegram's caption limit (1024 characters)
+ * @param text Text to truncate
+ * @returns Truncated text
+ */
+function truncateCaption(text: string, maxLength: number = 1000): string {
+  if (text.length <= maxLength) return text;
+  
+  // Find the last complete sentence before the limit
+  const truncated = text.substring(0, maxLength);
+  const lastPeriod = truncated.lastIndexOf('.');
+  const lastExclamation = truncated.lastIndexOf('!');
+  const lastQuestion = truncated.lastIndexOf('?');
+  
+  const lastEnd = Math.max(lastPeriod, lastExclamation, lastQuestion);
+  
+  if (lastEnd > maxLength * 0.5) { // Only truncate at sentence end if it's not too early
+    return truncated.substring(0, lastEnd + 1) + '...';
+  }
+  
+  // If no good sentence end found, truncate at word boundary
+  const lastSpace = truncated.lastIndexOf(' ');
+  return truncated.substring(0, lastSpace) + '...';
 } 
