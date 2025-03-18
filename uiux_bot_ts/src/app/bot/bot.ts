@@ -20,8 +20,11 @@ import {
 import { quizRepository } from '../utils/quiz-repository';
 import { lessonRepository } from '../utils/lesson-repository';
 import { Scheduler } from './scheduler';
-import * as handlers from './handlers';
-import { BotContext, SessionData, sanitizeHtmlForTelegram } from './handlers';
+import { sanitizeHtmlForTelegram } from '../utils/telegram-utils';
+import { BotContext, SessionData } from './handlers/types';
+import { startCommand, unsubscribeCommand, helpCommand, lessonCommand } from './handlers/utility-handlers';
+import { onPollAnswer } from './handlers/quiz-handlers';
+import { LessonSections } from '../api/openai-client';
 
 // Configure logger
 const logger = getChildLogger('bot');
@@ -131,19 +134,19 @@ export class UIUXLessonBot {
    */
   private setupCommandHandlers(): void {
     // Start command - Subscribe to the bot
-    this.bot.command('start', handlers.startCommand);
+    this.bot.command('start', startCommand);
 
     // Stop command - Unsubscribe from the bot
-    this.bot.command('stop', handlers.unsubscribeCommand);
+    this.bot.command('stop', unsubscribeCommand);
 
     // Help command - Show help message
-    this.bot.command('help', handlers.helpCommand);
+    this.bot.command('help', helpCommand);
 
     // Lesson command - Request a UI/UX lesson
-    this.bot.command('lesson', handlers.lessonCommand);
+    this.bot.command('lesson', lessonCommand);
 
     // Poll answer handler
-    this.bot.on('poll_answer', handlers.onPollAnswer);
+    this.bot.on('poll_answer', onPollAnswer);
   }
 
   /**
@@ -168,7 +171,7 @@ export class UIUXLessonBot {
     
     // Generate lesson content
     try {
-      const lessonSections = await generateLesson(theme);
+      const lessonSections = await generateLesson();
       
       // Get an image for the lesson
       let imageUrl = null;
@@ -186,8 +189,14 @@ export class UIUXLessonBot {
       // Send to all subscribers
       for (const subscriber of subscribers) {
         try {
+          // Format content
+          const formattedContent = formatLessonContent(lessonSections);
+          
+          // Format vocabulary
+          const formattedVocabulary = formatVocabulary(lessonSections.vocabulary);
+          
           // Combine title and main content
-          const mainContentWithTitle = `${sanitizeHtmlForTelegram(lessonSections.title)}\n\n${sanitizeHtmlForTelegram(lessonSections.mainContent)}`;
+          const mainContentWithTitle = `${sanitizeHtmlForTelegram(lessonSections.title)}\n\n${sanitizeHtmlForTelegram(formattedContent)}`;
           
           // 1. Send the title and main content with image if available
           if (imageUrl && (imageUrl.startsWith('http://') || imageUrl.startsWith('https://'))) {
@@ -216,7 +225,7 @@ export class UIUXLessonBot {
               // Then send the main content separately
               await this.bot.api.sendMessage(
                 subscriber.id,
-                sanitizeHtmlForTelegram(lessonSections.mainContent),
+                sanitizeHtmlForTelegram(formattedContent),
                 { parse_mode: 'HTML' }
               );
             }
@@ -229,10 +238,10 @@ export class UIUXLessonBot {
           }
           
           // 2. Send vocabulary separately if available
-          if (lessonSections.hasVocabulary) {
+          if (lessonSections.vocabulary && lessonSections.vocabulary.length > 0) {
             await this.bot.api.sendMessage(
               subscriber.id,
-              sanitizeHtmlForTelegram(lessonSections.vocabulary),
+              sanitizeHtmlForTelegram(formattedVocabulary),
               { parse_mode: 'HTML' }
             );
           }
@@ -423,4 +432,42 @@ export async function startBot(): Promise<void> {
     logger.error(`Error starting bot: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
+}
+
+/**
+ * Format lesson content from lesson sections
+ */
+function formatLessonContent(sections: LessonSections): string {
+  let content = '';
+  
+  // Add content points
+  if (Array.isArray(sections.contentPoints) && sections.contentPoints.length > 0) {
+    content = sections.contentPoints.join('\n\n');
+  }
+  
+  // Add example link if available
+  if (sections.example_link) {
+    content += `\n\n<b>🔍 Real-World Example:</b>\n<a href="${sections.example_link.url}">${sections.example_link.url}</a>\n${sections.example_link.description}`;
+  }
+  
+  // Add video query if available
+  if (sections.videoQuery) {
+    content += `\n\n<b>🎥 Watch & Learn:</b>\nSearch for "${sections.videoQuery}" on YouTube to find relevant tutorials.`;
+  }
+  
+  return content;
+}
+
+/**
+ * Format vocabulary terms
+ */
+function formatVocabulary(vocabularyTerms: Array<{ term: string; definition: string; example: string }>): string {
+  if (!vocabularyTerms || vocabularyTerms.length === 0) {
+    return '';
+  }
+  
+  return '<b>📚 Key Vocabulary</b>\n\n' + 
+    vocabularyTerms
+      .map(item => `<b>${item.term}</b>: ${item.definition}\n<i>Example:</i> ${item.example}`)
+      .join('\n\n');
 }

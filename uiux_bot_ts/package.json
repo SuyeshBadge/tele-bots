@@ -18,7 +18,8 @@
     "test:watch": "jest --watch",
     "check-types": "tsc --noEmit",
     "prepare": "npm run build",
-    "health-check": "ts-node -r tsconfig-paths/register src/scripts/health-check.ts"
+    "health-check": "ts-node -r tsconfig-paths/register src/scripts/health-check.ts",
+    "db:migrate": "ts-node src/database/run-migration.ts"
   },
   "keywords": [
     "telegram",

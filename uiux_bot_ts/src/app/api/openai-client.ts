@@ -3,7 +3,7 @@
  */
 
 import { OpenAI } from 'openai';
-import { getChildLogger, logOpenAIResponse } from '../utils/logger';
+import { getChildLogger } from '../utils/logger';
 import { settings, UI_UX_THEMES } from '../config/settings';
 import fs from 'fs';
 import path from 'path';
@@ -64,7 +64,7 @@ const _explanationCacheTtl = 3600 * 24; // Cache for 24 hours
  */
 interface LessonData {
   title: string;
-  content: string;           // Kept for backward compatibility
+  theme: string;
   content_points: string[];  // Array of bullet points
   quiz_question: string;
   quiz_options: string[];
@@ -73,7 +73,7 @@ interface LessonData {
   option_explanations?: string[];
   vocabulary_terms?: {term: string, definition: string, example: string}[]; // Array of vocabulary terms with definitions and examples
   example_link?: {url: string, description: string}; // Link to a real-world example implementation
-  video_link?: {url: string, title: string, description: string}; // Link to a relevant YouTube tutorial video
+  video_query?: string; // Search query for YouTube
 }
 
 /**
@@ -93,33 +93,23 @@ interface QuizData {
  * @param theme - The theme to generate a lesson for
  * @returns The generated lesson data
  */
-async function generateLessonContent(theme: string): Promise<LessonData> {
-  // Check cache first
-  const themeLower = theme.toLowerCase().trim();
-  if (themeLower in _lessonCache) {
-    const { timestamp, content } = _lessonCache[themeLower];
-    if (Date.now() - timestamp < _cacheTtl * 1000) {
-      logger.info(`Using cached lesson for theme: ${theme}`);
-      return content;
-    }
-  }
+async function generateLessonContent(): Promise<LessonData> {
+
   
-  // If OpenAI is disabled, return fallback lesson immediately
-  if (settings.DISABLE_OPENAI) {
-    logger.info("OpenAI API disabled, using fallback lesson");
-    return getFallbackLesson(theme);
-  }
+
   
   let retryCount = 0;
   const maxRetries = 2; // Reduced from 3 to 2
   
   while (retryCount < maxRetries) {
+    let theme = '';
     try {
       // Generate the prompt for the API call - streamlined for better content
       const prompt = (
         `Generate a beginner-friendly UI/UX design lesson with a **clear, engaging structure**. Follow these strict guidelines:\n\n` +
       
         `1️⃣ **Title**: A short, engaging title (max 10 words).\n\n` +
+        `2️⃣ **Theme**: The theme of the lesson (max 10 words).\n\n` +
       
         `2️⃣ **Key Learning Points** (5-7 total):\n` +
         `   - Each must start with a unique, relevant emoji (🎨 for colors, 🖱️ for interaction, 📱 for mobile, etc.).\n` +
@@ -142,12 +132,17 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         `   - The question must be **clear, relevant, and beginner-friendly**.\n` +
         `   - Incorrect answers should be **plausible but clearly incorrect** (no trick questions).\n\n` +
       
-        `6️⃣ **Explanations for Each Answer**:\n` +
+        `6️⃣ **Video Topic**:\n` +
+        `   - Suggest a specific, focused search query for finding a relevant tutorial video.\n` +
+        `   - The query should be 3-6 words long and highly specific to the lesson topic.\n\n` +
+      
+        `7️⃣ **Explanations for Each Answer**:\n` +
         `   - Explain why the **correct answer is right** in a clear, friendly way (max 40 words).\n` +
         `   - Explain why each **wrong answer is incorrect** in a simple, non-technical way (max 30 words each).\n\n` +
       
         `🚀 **Response Format (JSON, always valid and properly formatted):**\n` +
         `{\n` +
+        `  "theme": "string (UI/UX Design, Color Theory, etc.)",\n` +
         `  "title": "string (max 10 words)",\n` +
         `  "content_points": ["string (each must start with a unique emoji, max 20 words)"],\n` +
         `  "example_link": {"url": "valid URL", "description": "string (max 20 words)"},\n` +
@@ -156,7 +151,8 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         `  "quiz_options": ["string", "string", "string", "string"],\n` +
         `  "correct_option_index": integer (0-3),\n` +
         `  "explanation": "string (max 40 words, explaining the correct answer)",\n` +
-        `  "option_explanations": ["string (max 30 words)", "string (max 30 words)", "string (max 30 words)", "string (max 30 words)"]\n` +
+        `  "option_explanations": ["string (max 30 words)", "string (max 30 words)", "string (max 30 words)", "string (max 30 words)"},\n` +
+        `  "video_query": "string (3-6 words for YouTube search)"\n` +
         `}\n\n` +
       
         `⚠️ **Important Guidelines**:\n` +
@@ -165,12 +161,12 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         `- Keep answers **concise, structured, and varied** (no repeated emojis or phrasing).\n` +
         `- Follow **word limits strictly** to maintain readability and consistency.\n` +
         `- Make vocabulary examples relatable to real design situations that beginners can understand.\n` +
-        `- For example links, use real websites or applications that clearly showcase the concept in action.`
+        `- For example links, use real websites or applications that clearly showcase the concept in action. Send the exact URL to the example that is relevant to the lesson except apple.com .`
       );
       
 
       // Make the API call with better prompt focused on emojis
-      logger.info(`Sending OpenAI request for lesson on theme: '${theme}' with model: ${settings.OPENAI_MODEL}`);
+      logger.info(`Sending OpenAI request for lesson with model: ${settings.OPENAI_MODEL}`);
       
       // Record the prompt for logging
       // Define the system message for AI behavior
@@ -187,8 +183,8 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
 
       
       // Log if detailed logging is enabled
-      logOpenAIResponse(`LESSON SYSTEM PROMPT`, { prompt: systemMessage });
-      logOpenAIResponse(`LESSON USER PROMPT`, { prompt: prompt });
+      openaiLogger.info(`LESSON SYSTEM PROMPT`, { prompt: systemMessage });
+      openaiLogger.info(`LESSON USER PROMPT`, { prompt: prompt });
       
       logger.debug(`LESSON SYSTEM PROMPT: ${systemMessage}`);
       logger.debug(`LESSON USER PROMPT: ${prompt}`);
@@ -224,8 +220,8 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
       logger.info(`OpenAI response received - Finish reason: ${finishReason}, Tokens: ${completionTokens}/${promptTokens}/${totalTokens}`);
       
       // Log request details and response to the specialized OpenAI logger
-      logOpenAIResponse(`LESSON REQUEST - Theme: '${theme}', Model: ${settings.OPENAI_MODEL}, Tokens: ${totalTokens}`);
-      logOpenAIResponse(`LESSON RESPONSE - Raw`, { response: content });
+      openaiLogger.info(`LESSON REQUEST - Model: ${settings.OPENAI_MODEL}, Tokens: ${totalTokens}`);
+      openaiLogger.info(`LESSON RESPONSE - Raw`, { response: content });
       logger.debug(`LESSON RESPONSE - Raw: ${content}`);
       
       let cleanedContent = content.trim();
@@ -238,9 +234,9 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
       // Try direct JSON parsing
       try {
         const lessonData = JSON.parse(cleanedContent) as LessonData;
-        
+        theme = lessonData.theme;
         // Validate required fields
-        const requiredFields = ['title', 'content_points', 'quiz_question', 'quiz_options', 'correct_option_index', 'explanation'];
+        const requiredFields = ['title', 'theme', 'content_points', 'quiz_question', 'quiz_options', 'correct_option_index', 'explanation'];
         for (const field of requiredFields) {
           if (!(field in lessonData)) {
             throw new Error(`Missing required field in lesson data: ${field}`);
@@ -274,27 +270,13 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
           // If vocabulary terms are missing, provide an empty array
           lessonData.vocabulary_terms = [];
         }
-        
-        // Validate example_link if it exists
-        if (lessonData.example_link) {
-          if (typeof lessonData.example_link !== 'object' || lessonData.example_link === null || 
-              !('url' in lessonData.example_link) || !('description' in lessonData.example_link)) {
-            // If example_link is invalid, provide a default one
-            lessonData.example_link = getExampleLinkForTheme(theme);
-          } else {
-            // Validate URL format
-            try {
-              new URL(lessonData.example_link.url);
-              // URL is valid
-            } catch (error) {
-              // URL is invalid, provide a default
-              lessonData.example_link = getExampleLinkForTheme(theme);
-            }
-          }
-        } else {
-          // If example_link is missing, provide a default
-          lessonData.example_link = getExampleLinkForTheme(theme);
+
+        // Validate theme
+        if (!lessonData.theme) {
+          throw new Error('Theme is required');
         }
+        const themeLower = theme.toLowerCase().trim();
+        
         
         // Add to cache
         _lessonCache[themeLower] = {
@@ -311,7 +293,7 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
         retryCount++;
         if (retryCount >= maxRetries) {
           logger.warn(`Maximum retries reached, using fallback lesson for theme: ${theme}`);
-          return getFallbackLesson(theme);
+          throw new Error(`Failed to generate lesson: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
         }
         
         // Wait before retrying
@@ -323,7 +305,7 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
       retryCount++;
       if (retryCount >= maxRetries) {
         logger.warn(`Maximum retries reached, using fallback lesson for theme: ${theme}`);
-        return getFallbackLesson(theme);
+        throw new Error(`Failed to generate lesson: ${error instanceof Error ? error.message : String(error)}`);
       }
       
       // Wait before retrying
@@ -331,153 +313,7 @@ async function generateLessonContent(theme: string): Promise<LessonData> {
     }
   }
   
-  // Fallback if all else fails
-  return getFallbackLesson(theme);
-}
-
-/**
- * Get a fallback lesson if OpenAI API is disabled or fails
- * 
- * @param theme - The theme to create a fallback lesson for
- * @returns A basic lesson data object
- */
-function getFallbackLesson(theme: string): LessonData {
-  // Create content points with emojis included
-  const contentPoints = [
-    `🎨 ${theme} is an important concept in UI/UX design focused on creating better user experiences`,
-    `👤 When implementing ${theme}, always consider your users' needs and expectations first`,
-    `🔬 Research and user testing are essential parts of effectively applying ${theme} in your designs`,
-    `🧩 Start with simple implementations of ${theme} and iterate based on user feedback`,
-    `📱 Study successful products to see how they've incorporated ${theme} principles`,
-    `🔄 Maintain consistency in your ${theme} approach across all parts of your interface`
-  ];
-  
-  // Keep the original content format for backward compatibility
-  const content = contentPoints.join('\n\n');
-  
-  // Set up quiz options
-  const quizOptions = [
-    "Making it look visually impressive",
-    "Using user feedback to improve designs",
-    "Ignoring accessibility concerns",
-    "Following the latest design trends"
-  ];
-  
-  // Correct answer is option 1: "Using user feedback to improve designs"
-  const correctOptionIndex = 1;
-  
-  // Create detailed explanations for each option
-  const optionExplanations = [
-    "Visual appeal is important, but it should always be balanced with usability. Simply making designs visually impressive without considering usability can lead to poor user experiences. Always prioritize user needs over pure aesthetics.",
-    
-    "Correct! Using user feedback is essential when implementing any UI/UX design principle. User feedback provides real-world insights into how people interact with your designs and helps you create more effective, user-centered solutions.",
-    
-    "Accessibility should never be ignored! It's a crucial part of good UI/UX design that ensures your products can be used by everyone, including people with disabilities. Ignoring accessibility limits your user base and can lead to legal issues.",
-    
-    "While staying aware of trends is valuable, blindly following them without considering if they serve your specific users' needs can lead to poor design choices. Design trends change frequently, but good user experience principles remain consistent."
-  ];
-
-  // Add vocabulary terms related to the theme
-  const vocabularyTerms = [
-    { 
-      term: `${theme}`, 
-      definition: `A key concept in UI/UX design that enhances user experience and interface quality.`, 
-      example: `A checkout flow redesigned using ${theme} principles increased conversion by 20%.` 
-    },
-    { 
-      term: "User feedback", 
-      definition: "Information collected from users about their experience with a product.", 
-      example: "Surveys showing users found the navigation menu confusing led to a redesign." 
-    },
-    { 
-      term: "Iteration", 
-      definition: "The process of repeatedly improving a design based on testing and feedback.", 
-      example: "A design team created five versions of a button before finding the optimal solution." 
-    },
-    { 
-      term: "User-centered design", 
-      definition: "Design approach that prioritizes users' needs in all design decisions.", 
-      example: "Designing a medical app based on interviews with actual healthcare providers." 
-    }
-  ];
-
-  // Add a real-world example link based on the theme
-  const exampleLink = getExampleLinkForTheme(theme);
-
-  return {
-    title: `Introduction to ${theme} in UI/UX Design`,
-    content,
-    content_points: contentPoints,
-    quiz_question: `What is the most important consideration when implementing ${theme} in UI/UX design?`,
-    quiz_options: quizOptions,
-    correct_option_index: correctOptionIndex,
-    explanation: `Focusing on user needs and expectations is always the most important aspect of any UI/UX design concept. ${theme} should serve the users, not just look impressive or follow trends.`,
-    option_explanations: optionExplanations,
-    vocabulary_terms: vocabularyTerms,
-    example_link: exampleLink
-  };
-}
-
-/**
- * Get an appropriate example link based on the theme
- * @param theme The UI/UX design theme
- * @returns An example link object with url and description
- */
-function getExampleLinkForTheme(theme: string): {url: string, description: string} {
-  // Map of themes to appropriate example links
-  const themeExamples: Record<string, {url: string, description: string}> = {
-    "UI/UX Principles": {
-      url: "https://www.airbnb.com",
-      description: "Airbnb uses clear visual hierarchy and intuitive navigation that demonstrates core UI/UX principles."
-    },
-    "Color Theory": {
-      url: "https://stripe.com",
-      description: "Stripe's website demonstrates effective use of color to guide users and create visual hierarchy."
-    },
-    "Typography": {
-      url: "https://medium.com",
-      description: "Medium uses typography expertly to create readable, scannable content with clear hierarchy."
-    },
-    "Visual Hierarchy": {
-      url: "https://www.apple.com",
-      description: "Apple's website exemplifies strong visual hierarchy directing attention to key elements."
-    },
-    "Responsive Design": {
-      url: "https://www.nytimes.com",
-      description: "The New York Times website adapts seamlessly across different device sizes."
-    },
-    "User Research": {
-      url: "https://www.gov.uk",
-      description: "GOV.UK's design is based on extensive user research, creating simple, accessible interfaces."
-    },
-    "Accessibility": {
-      url: "https://www.gov.uk",
-      description: "GOV.UK demonstrates excellent accessibility features following WCAG guidelines."
-    },
-    "Design Systems": {
-      url: "https://material.io",
-      description: "Google's Material Design showcases a comprehensive, consistent design system."
-    },
-    "Navigation Patterns": {
-      url: "https://www.amazon.com",
-      description: "Amazon's complex navigation system handles millions of products while remaining usable."
-    },
-    "Form Design": {
-      url: "https://www.typeform.com",
-      description: "Typeform demonstrates excellent form design with clear, user-friendly interfaces."
-    }
-  };
-  
-  // Check if we have a specific example for this theme
-  if (theme in themeExamples) {
-    return themeExamples[theme];
-  }
-  
-  // If no specific example for this theme, return a default example
-  return {
-    url: "https://www.nngroup.com/articles/",
-    description: `Nielsen Norman Group offers research-backed articles about ${theme} and other UI/UX concepts.`
-  };
+  throw new Error(`Failed to generate lesson`);
 }
 
 /**
@@ -486,88 +322,53 @@ function getExampleLinkForTheme(theme: string): {url: string, description: strin
  * @param theme - Optional theme for the lesson
  * @returns Lesson content separated by sections
  */
-interface LessonSections {
+export interface LessonSections {
   title: string;
-  mainContent: string;
-  vocabulary: string;
-  hasVocabulary: boolean;
-  videoUrl?: string;
-  videoTitle?: string;
-  videoDescription?: string;
+  theme: string;
+  contentPoints: string[];
+  quizQuestion: string;
+  quizOptions: string[];
+  correctOptionIndex: number;
+  explanation: string;
+  optionExplanations: string[];
+  vocabulary: {term: string, definition: string, example: string}[];
+  videoQuery?: string;
   example_link?: {url: string, description: string};
 }
 
-export async function generateLesson(theme?: string): Promise<LessonSections> {
-  const lessonTheme = theme || getRandomTheme();
-  
+export async function generateLesson(): Promise<LessonSections> {
   try {
     // Generate lesson content using OpenAI
-    const lessonData = await generateLessonContent(lessonTheme);
+    const lessonData = await generateLessonContent();
+
+    logger.info(`Lesson ${lessonData.title} ${lessonData.theme}`, {
+      lessonData
+    });
     
     // Also cache this as a quiz since it contains quiz data
-    _quizCache[lessonTheme.toLowerCase().trim()] = {
+    _quizCache[lessonData.theme.toLowerCase().trim()] = {
       timestamp: Date.now(),
       content: {
         question: lessonData.quiz_question,
         options: lessonData.quiz_options,
         correctIndex: lessonData.correct_option_index,
         explanation: lessonData.explanation,
-        option_explanations: lessonData.option_explanations || generateDefaultExplanations(lessonData.quiz_options, lessonData.correct_option_index, lessonTheme)
+        option_explanations: lessonData.option_explanations || generateDefaultExplanations(lessonData.quiz_options, lessonData.correct_option_index, lessonData.theme)
       }
     };
     
-    // Format content (OpenAI is already providing emojis in each point)
-    let contentString: string;
-    
-    if (Array.isArray(lessonData.content_points) && lessonData.content_points.length > 0) {
-      // Simply join the emoji-enhanced points with proper spacing
-      contentString = lessonData.content_points
-        .filter(point => point.trim()) // Remove empty points
-        .join('\n\n'); // Double newline for better readability
-    } else {
-      // Fall back to the content string if content_points is not available
-      contentString = lessonData.content;
-    }
-    
-    // Add example link if available
-    if (lessonData.example_link) {
-      contentString += `\n\n<b>🔍 Real-World Example:</b>\n<a href="${lessonData.example_link.url}">${lessonData.example_link.url}</a>\n${lessonData.example_link.description}`;
-    }
-    
-    // Add video link if available
-    if (lessonData.video_link) {
-      contentString += `\n\n<b>🎥 Watch & Learn:</b>\n<a href="${lessonData.video_link.url}">${lessonData.video_link.title}</a>\n${lessonData.video_link.description}`;
-    }
-    
-    // Format vocabulary terms if available
-    let vocabularyString = '';
-    let hasVocabulary = false;
-    if (Array.isArray(lessonData.vocabulary_terms) && lessonData.vocabulary_terms.length > 0) {
-      vocabularyString = '<b>📚 Key Vocabulary</b>\n\n' + 
-        lessonData.vocabulary_terms
-          .map(item => `<b>${item.term}</b>: ${item.definition}\n<i>Example:</i> ${item.example}`)
-          .join('\n\n');
-      hasVocabulary = true;
-    }
-    
-    // Format the title
-    const titleEmojis = ['✨', '🌟', '💫', '🎨', '🖌️', '🎭']; 
-    const randomEmoji = titleEmojis[Math.floor(Math.random() * titleEmojis.length)];
-    const formattedTitle = `<b>${randomEmoji} ${lessonData.title} ${randomEmoji}</b>`;
-    
-    // Return the sections separately
-    logger.info(`Successfully formatted lesson on theme: ${lessonTheme} with ${
-      Array.isArray(lessonData.content_points) ? lessonData.content_points.length : 0
-    } points and ${hasVocabulary ? lessonData.vocabulary_terms?.length : 0} vocabulary terms`);
-    
+    // Return the sections in the correct format
     return {
-      title: formattedTitle,
-      mainContent: contentString,
-      vocabulary: vocabularyString,
-      hasVocabulary,
-      videoUrl: lessonData.video_link?.url,
-      videoTitle: lessonData.video_link?.title,
-      videoDescription: lessonData.video_link?.description,
+      title: lessonData.title,
+      theme: lessonData.theme,
+      contentPoints: lessonData.content_points,
+      quizQuestion: lessonData.quiz_question,
+      quizOptions: lessonData.quiz_options,
+      correctOptionIndex: lessonData.correct_option_index,
+      explanation: lessonData.explanation,
+      optionExplanations: lessonData.option_explanations || [],
+      vocabulary: lessonData.vocabulary_terms || [],
+      videoQuery: lessonData.video_query,
       example_link: lessonData.example_link
     };
   } catch (error) {
@@ -597,7 +398,7 @@ export async function generateQuiz(theme?: string): Promise<QuizData> {
     }
     
     // If no cached quiz, generate lesson content which includes quiz data
-    const lessonData = await generateLessonContent(quizTheme);
+    const lessonData = await generateLessonContent();
     
     return {
       question: lessonData.quiz_question,

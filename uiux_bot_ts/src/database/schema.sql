@@ -33,13 +33,17 @@ CREATE TABLE IF NOT EXISTS public.lessons (
   theme TEXT NOT NULL,
   title TEXT NOT NULL,
   content TEXT NOT NULL,
+  vocabulary TEXT,
+  has_vocabulary BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   quiz_question TEXT,
   quiz_options TEXT[],
   quiz_correct_index INTEGER,
   explanation TEXT,
   option_explanations TEXT[],
-  image_url TEXT
+  image_url TEXT,
+  example_link JSONB,
+  video_query TEXT
 );
 
 -- User history table for tracking user interactions

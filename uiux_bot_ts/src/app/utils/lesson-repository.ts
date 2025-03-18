@@ -8,21 +8,7 @@
 import { logger } from './logger';
 import { settings } from '../config/settings';
 import { getSupabaseClient } from '../../database/supabase-client';
-
-// Define the lesson data structure
-export interface LessonData {
-  id: string;
-  theme: string;
-  title: string;
-  content: string;
-  createdAt: string;
-  quizQuestion?: string;
-  quizOptions?: string[];
-  quizCorrectIndex?: number;
-  explanation?: string;
-  optionExplanations?: string[];
-  imageUrl?: string;
-}
+import { LessonData } from './lesson-types';
 
 // Supabase DB model
 interface LessonDBModel {
@@ -30,6 +16,8 @@ interface LessonDBModel {
   theme: string;
   title: string;
   content: string;
+  vocabulary: string;
+  has_vocabulary: boolean;
   created_at: string;
   quiz_question?: string;
   quiz_options?: string[];
@@ -37,6 +25,11 @@ interface LessonDBModel {
   explanation?: string;
   option_explanations?: string[];
   image_url?: string;
+  example_link?: {
+    url: string;
+    description: string;
+  };
+  video_query?: string;
 }
 
 /**
@@ -86,16 +79,20 @@ export class LessonRepository {
   private fromDbModel(dbModel: LessonDBModel): LessonData {
     return {
       id: dbModel.id,
-      theme: dbModel.theme,
       title: dbModel.title,
       content: dbModel.content,
+      vocabulary: dbModel.vocabulary,
+      hasVocabulary: dbModel.has_vocabulary,
       createdAt: dbModel.created_at,
+      theme:dbModel.theme,
       quizQuestion: dbModel.quiz_question,
       quizOptions: dbModel.quiz_options,
       quizCorrectIndex: dbModel.quiz_correct_index,
       explanation: dbModel.explanation,
       optionExplanations: dbModel.option_explanations,
-      imageUrl: dbModel.image_url
+      imageUrl: dbModel.image_url,
+      example_link: dbModel.example_link,
+      videoQuery: dbModel.video_query
     };
   }
   
@@ -111,13 +108,17 @@ export class LessonRepository {
         theme: appModel.theme,
         title: appModel.title,
         content: appModel.content,
+        vocabulary: appModel.vocabulary,
+        has_vocabulary: appModel.hasVocabulary,
         created_at: appModel.createdAt,
         quiz_question: appModel.quizQuestion,
         quiz_options: appModel.quizOptions,
         quiz_correct_index: appModel.quizCorrectIndex,
         explanation: appModel.explanation,
         option_explanations: appModel.optionExplanations,
-        image_url: appModel.imageUrl
+        image_url: appModel.imageUrl,
+        example_link: appModel.example_link,
+        video_query: appModel.videoQuery
       };
       
       return dbModel;
@@ -125,30 +126,30 @@ export class LessonRepository {
       logger.error(`Error converting lesson to DB model: ${error instanceof Error ? error.message : String(error)}`);
       
       // Fallback to a simpler model with alternative column names if needed
-      // This helps with databases that might have different column names
       const fallbackModel: any = {
         id: appModel.id,
-        theme: appModel.theme,
-        lesson_title: appModel.title, // Alternative column name 
-        lesson_content: appModel.content, // Alternative column name
+        lesson_title: appModel.title,
+        lesson_content: appModel.content,
+        vocabulary: appModel.vocabulary,
+        has_vocabulary: appModel.hasVocabulary,
         created_at: appModel.createdAt,
-        created: appModel.createdAt, // Alternative column name
+        created: appModel.createdAt,
       };
       
       // Add quiz fields if they exist
       if (appModel.quizQuestion) {
         fallbackModel.quiz_question = appModel.quizQuestion;
-        fallbackModel.question = appModel.quizQuestion; // Alternative column name
+        fallbackModel.question = appModel.quizQuestion;
       }
       
       if (appModel.quizOptions) {
         fallbackModel.quiz_options = appModel.quizOptions;
-        fallbackModel.options = appModel.quizOptions; // Alternative column name
+        fallbackModel.options = appModel.quizOptions;
       }
       
       if (appModel.quizCorrectIndex !== undefined) {
         fallbackModel.quiz_correct_index = appModel.quizCorrectIndex;
-        fallbackModel.correct_index = appModel.quizCorrectIndex; // Alternative column name
+        fallbackModel.correct_index = appModel.quizCorrectIndex;
       }
       
       if (appModel.explanation) {
@@ -161,7 +162,15 @@ export class LessonRepository {
       
       if (appModel.imageUrl) {
         fallbackModel.image_url = appModel.imageUrl;
-        fallbackModel.image = appModel.imageUrl; // Alternative column name
+        fallbackModel.image = appModel.imageUrl;
+      }
+      
+      if (appModel.example_link) {
+        fallbackModel.example_link = appModel.example_link;
+      }
+      
+      if (appModel.videoQuery) {
+        fallbackModel.video_query = appModel.videoQuery;
       }
       
       logger.warn('Using fallback model for lesson due to conversion error');
