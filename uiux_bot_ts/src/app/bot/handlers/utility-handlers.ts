@@ -1,7 +1,7 @@
 import { BotContext } from './types';
 import { getChildLogger } from '../../utils/logger';
 import { logActivity } from '../../utils/logger';
-import { getSubscriber, updateSubscriber, deleteSubscriber } from '../../utils/persistence';
+import { getSubscriber, createSubscriber, updateSubscriber, deleteSubscriber } from '../../utils/persistence';
 import { settings } from '../../config/settings';
 import { sendLesson } from '../../utils/lesson-utils';
 
@@ -20,6 +20,22 @@ export async function startCommand(ctx: BotContext): Promise<void> {
     // Get or create subscriber
     const subscriber = await getSubscriber(userId);
     if (!subscriber) {
+      // Create a new subscriber
+      const newSubscriber = {
+        id: userId,
+        firstName: ctx.from?.first_name,
+        lastName: ctx.from?.last_name,
+        username: ctx.from?.username,
+        joinedAt: new Date().toISOString(),
+        lastActivity: new Date().toISOString(),
+        lessonCount: 0,
+        quizCount: 0,
+        isAdmin: false
+      };
+      
+      await createSubscriber(newSubscriber);
+      logger.info(`Created new subscriber: ${userId}`);
+      
       await ctx.reply(
         "👋 Welcome to the UI/UX Learning Bot!\n\n" +
         "I'll help you learn about UI/UX design through interactive lessons and quizzes.\n\n" +
