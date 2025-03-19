@@ -91,8 +91,8 @@ class HealthServer {
       res.end('Not found');
     });
 
-    this.server.listen(port, () => {
-      logger.info(`Health server listening on port ${port}`);
+    this.server.listen(port, '0.0.0.0', () => {
+      logger.info(`Health server listening on 0.0.0.0:${port}`);
     });
 
     // Handle server errors
