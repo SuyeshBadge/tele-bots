@@ -25,6 +25,7 @@ import { BotContext, SessionData } from './handlers/types';
 import { startCommand, unsubscribeCommand, helpCommand, lessonCommand } from './handlers/utility-handlers';
 import { onPollAnswer } from './handlers/quiz-handlers';
 import { LessonSections } from '../api/openai-client';
+import { sendLessonToRecipient, formatLessonContent, formatVocabulary } from '../utils/lesson-utils';
 
 // Configure logger
 const logger = getChildLogger('bot');
@@ -163,21 +164,23 @@ export class UIUXLessonBot {
     }
     
     // Import the openai client dynamically to avoid circular dependencies
-    const { generateLesson, generateQuiz, getRandomTheme } = await import('../api/openai-client');
+    const { generateLesson, generateQuiz } = await import('../api/openai-client');
     const { getImageForLesson } = await import('../api/image-manager');
     
-    // Generate a random theme
-    const theme = getRandomTheme();
-    
-    // Generate lesson content
+    // Generate lesson content, avoiding recent themes and quizzes
     try {
-      const lessonSections = await generateLesson();
+      // Get recent themes from the last month to avoid repetition
+      const recentThemes = await lessonRepository.getRecentThemes();
+      const recentQuizzes = await lessonRepository.getRecentQuizzes();
+      
+      // Generate lesson with themes to avoid
+      const lessonSections = await generateLesson(recentThemes, recentQuizzes);
       
       // Get an image for the lesson
       let imageUrl = null;
       
       try {
-        const imageDetails = await getImageForLesson(theme);
+        const imageDetails = await getImageForLesson(lessonSections.theme);
         if (imageDetails && imageDetails.url) {
           // Prioritize remote URLs for Telegram
           imageUrl = imageDetails.url;
@@ -189,62 +192,12 @@ export class UIUXLessonBot {
       // Send to all subscribers
       for (const subscriber of subscribers) {
         try {
-          // Format content
-          const formattedContent = formatLessonContent(lessonSections);
-          
-          // Format vocabulary
-          const formattedVocabulary = formatVocabulary(lessonSections.vocabulary);
-          
-          // Combine title and main content
-          const mainContentWithTitle = `${sanitizeHtmlForTelegram(lessonSections.title)}\n\n${sanitizeHtmlForTelegram(formattedContent)}`;
-          
-          // 1. Send the title and main content with image if available
-          if (imageUrl && (imageUrl.startsWith('http://') || imageUrl.startsWith('https://'))) {
-            // Check if combined content exceeds Telegram's caption limit (1024 characters)
-            if (mainContentWithTitle.length <= 1024) {
-              // If it fits, send image with combined title and content as caption
-              await this.bot.api.sendPhoto(
-                subscriber.id, 
-                imageUrl, 
-                {
-                  caption: mainContentWithTitle,
-                  parse_mode: 'HTML'
-                }
-              );
-            } else {
-              // If too long, send image with just the title
-              await this.bot.api.sendPhoto(
-                subscriber.id, 
-                imageUrl, 
-                {
-                  caption: sanitizeHtmlForTelegram(lessonSections.title),
-                  parse_mode: 'HTML'
-                }
-              );
-              
-              // Then send the main content separately
-              await this.bot.api.sendMessage(
-                subscriber.id,
-                sanitizeHtmlForTelegram(formattedContent),
-                { parse_mode: 'HTML' }
-              );
-            }
-          } else {
-            await this.bot.api.sendMessage(
-              subscriber.id,
-              mainContentWithTitle,
-              { parse_mode: 'HTML' }
-            );
-          }
-          
-          // 2. Send vocabulary separately if available
-          if (lessonSections.vocabulary && lessonSections.vocabulary.length > 0) {
-            await this.bot.api.sendMessage(
-              subscriber.id,
-              sanitizeHtmlForTelegram(formattedVocabulary),
-              { parse_mode: 'HTML' }
-            );
-          }
+          // Use the unified function to send the lesson content
+          await sendLessonToRecipient(
+            { bot: this.bot, chatId: subscriber.id },
+            lessonSections,
+            imageUrl || undefined
+          );
           
           // Update subscriber stats
           await incrementLessonCount(subscriber.id);
@@ -253,10 +206,10 @@ export class UIUXLessonBot {
           setTimeout(async () => {
             try {
               // Generate quiz for the lesson
-              const quizData = await generateQuiz(theme);
+              const quizData = await generateQuiz(lessonSections.theme);
               
               if (!quizData || !quizData.question) {
-                logger.error(`Failed to generate quiz for theme: ${theme}`);
+                logger.error(`Failed to generate quiz for theme: ${lessonSections.theme}`);
                 return;
               }
               
@@ -276,14 +229,14 @@ export class UIUXLessonBot {
               // Save the quiz to the database for later reference
               await quizRepository.saveQuiz({
                 pollId: quiz.poll.id,
-                lessonId: theme,
+                lessonId: lessonSections.theme,
                 quizId: `quiz-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
                 correctOption: quizData.correctIndex,
                 question: quizData.question,
                 options: quizData.options,
                 explanation: quizData.explanation || "",
                 option_explanations: quizData.option_explanations || [],
-                theme: theme,
+                theme: lessonSections.theme,
                 createdAt: new Date().toISOString(),
                 expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
               });
@@ -292,11 +245,37 @@ export class UIUXLessonBot {
               await incrementQuizCount(subscriber.id);
             } catch (quizError) {
               logger.error(`Error sending quiz to subscriber ${subscriber.id}: ${quizError instanceof Error ? quizError.message : String(quizError)}`);
+              
+              // Check if this is a "chat not found" error, which means the user is no longer reachable
+              if (quizError instanceof GrammyError && 
+                  quizError.description.includes("chat not found")) {
+                logger.info(`Removing unreachable subscriber ${subscriber.id} (chat not found)`);
+                try {
+                  // Remove the subscriber from the database
+                  await deleteSubscriber(subscriber.id);
+                  logger.info(`Successfully removed unreachable subscriber ${subscriber.id}`);
+                } catch (deleteError) {
+                  logger.error(`Failed to remove unreachable subscriber ${subscriber.id}: ${deleteError instanceof Error ? deleteError.message : String(deleteError)}`);
+                }
+              }
             }
           }, 10000); // 10 second delay before quiz
           
         } catch (error) {
           logger.error(`Error sending scheduled lesson to subscriber ${subscriber.id}: ${error instanceof Error ? error.message : String(error)}`);
+          
+          // Check if this is a "chat not found" error, which means the user is no longer reachable
+          if (error instanceof GrammyError && 
+              error.description.includes("chat not found")) {
+            logger.info(`Removing unreachable subscriber ${subscriber.id} (chat not found)`);
+            try {
+              // Remove the subscriber from the database
+              await deleteSubscriber(subscriber.id);
+              logger.info(`Successfully removed unreachable subscriber ${subscriber.id}`);
+            } catch (deleteError) {
+              logger.error(`Failed to remove unreachable subscriber ${subscriber.id}: ${deleteError instanceof Error ? deleteError.message : String(deleteError)}`);
+            }
+          }
         }
       }
       
@@ -309,7 +288,7 @@ export class UIUXLessonBot {
         });
       }
       
-      logger.info(`Scheduled lesson sent to ${subscribers.length} subscribers on theme: ${theme}`);
+      logger.info(`Scheduled lesson sent to ${subscribers.length} subscribers`);
       
     } catch (error) {
       logger.error(`Error sending scheduled lesson: ${error instanceof Error ? error.message : String(error)}`);
@@ -432,42 +411,4 @@ export async function startBot(): Promise<void> {
     logger.error(`Error starting bot: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
-}
-
-/**
- * Format lesson content from lesson sections
- */
-function formatLessonContent(sections: LessonSections): string {
-  let content = '';
-  
-  // Add content points
-  if (Array.isArray(sections.contentPoints) && sections.contentPoints.length > 0) {
-    content = sections.contentPoints.join('\n\n');
-  }
-  
-  // Add example link if available
-  if (sections.example_link) {
-    content += `\n\n<b>🔍 Real-World Example:</b>\n<a href="${sections.example_link.url}">${sections.example_link.url}</a>\n${sections.example_link.description}`;
-  }
-  
-  // Add video query if available
-  if (sections.videoQuery) {
-    content += `\n\n<b>🎥 Watch & Learn:</b>\nSearch for "${sections.videoQuery}" on YouTube to find relevant tutorials.`;
-  }
-  
-  return content;
-}
-
-/**
- * Format vocabulary terms
- */
-function formatVocabulary(vocabularyTerms: Array<{ term: string; definition: string; example: string }>): string {
-  if (!vocabularyTerms || vocabularyTerms.length === 0) {
-    return '';
-  }
-  
-  return '<b>📚 Key Vocabulary</b>\n\n' + 
-    vocabularyTerms
-      .map(item => `<b>${item.term}</b>: ${item.definition}\n<i>Example:</i> ${item.example}`)
-      .join('\n\n');
 }

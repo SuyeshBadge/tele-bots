@@ -29,8 +29,6 @@ export async function sendLesson(ctx: BotContext, userId: number): Promise<void>
       return;
     }
     
-
-    
     // If no lesson found, generate a new one
     const lesson = await generateNewLesson();
     
@@ -39,8 +37,22 @@ export async function sendLesson(ctx: BotContext, userId: number): Promise<void>
       return;
     }
 
-    // Send the lesson content
-    await sendLessonContent(ctx, lesson);
+    // Get an image for the lesson
+    let imageUrl = null;
+    try {
+      // Import dynamically to avoid circular dependencies
+      const { getImageForLesson } = await import('../api/image-manager');
+      const imageDetails = await getImageForLesson(lesson.theme);
+      if (imageDetails && imageDetails.url) {
+        // Prioritize remote URLs for Telegram
+        imageUrl = imageDetails.url;
+      }
+    } catch (error) {
+      logger.error(`Error getting image for lesson: ${error}`);
+    }
+
+    // Send the lesson content using unified function
+    await sendLessonToRecipient(ctx, lesson, imageUrl || undefined);
     
     // Increment lesson count
     await incrementLessonCount(userId);
@@ -64,7 +76,6 @@ async function generateNewLesson(): Promise<LessonData | null> {
     // Get recent themes from the last month
     const recentThemes = await lessonRepository.getRecentThemes();
     const recentQuizzes = await lessonRepository.getRecentQuizzes();
-    logger.info(`Found ${recentThemes.length} recent themes to avoid`);
     
     // Generate lesson using OpenAI with recent themes to avoid
     const lessonSections = await openaiClient.generateLesson(recentThemes, recentQuizzes);
@@ -106,20 +117,26 @@ async function generateNewLesson(): Promise<LessonData | null> {
 /**
  * Format lesson content from lesson sections
  */
-function formatLessonContent(sections: LessonSections): string {
+export function formatLessonContent(sections: LessonSections): string {
   let content = '';
   
   // Add content points
   if (Array.isArray(sections.contentPoints) && sections.contentPoints.length > 0) {
     content = sections.contentPoints.join('\n\n');
-  }  
+  }
+  
+  // Add example link if available
+  if (sections.example_link) {
+    content += `\n\n<b>🔍 Real-World Example:</b>\n<a href="${sections.example_link.url}">${sections.example_link.url}</a>\n${sections.example_link.description}`;
+  }
+  
   return content;
 }
 
 /**
  * Format vocabulary terms
  */
-function formatVocabulary(vocabularyTerms: Array<{ term: string; definition: string; example: string }>): string {
+export function formatVocabulary(vocabularyTerms: Array<{ term: string; definition: string; example: string }>): string {
   if (!vocabularyTerms || vocabularyTerms.length === 0) {
     return '';
   }
@@ -132,6 +149,7 @@ function formatVocabulary(vocabularyTerms: Array<{ term: string; definition: str
 
 /**
  * Send lesson content to user
+ * @deprecated Use sendLessonToRecipient instead
  */
 async function sendLessonContent(ctx: BotContext, lesson: LessonData): Promise<void> {
   try {
@@ -166,5 +184,175 @@ async function sendLessonContent(ctx: BotContext, lesson: LessonData): Promise<v
   }
 }
 
+/**
+ * Send lesson content - flexible method for both requested and scheduled lessons
+ * @param recipient - Either BotContext or { bot, chatId } for direct API calls
+ * @param lesson - The lesson data to send
+ * @param imageUrl - Optional image URL to include with the message
+ */
+async function sendLessonToRecipient(
+  recipient: BotContext | { bot: any, chatId: number | string }, 
+  lesson: LessonData | LessonSections,
+  imageUrl?: string
+): Promise<void> {
+  try {
+    const isContext = 'reply' in recipient;
+    
+    // Format the content based on lesson type
+    let formattedContent: string;
+    let formattedVocabulary: string = '';
+    let title: string;
+    let theme: string;
+    let videoQuery: string | undefined;
+    
+    // Handle different lesson data structures
+    if ('content' in lesson) {
+      // It's a LessonData object
+      formattedContent = lesson.content;
+      title = lesson.title;
+      theme = lesson.theme;
+      videoQuery = lesson.videoQuery;
+      
+      if (lesson.hasVocabulary) {
+        formattedVocabulary = lesson.vocabulary;
+      }
+    } else {
+      // It's a LessonSections object
+      formattedContent = formatLessonContent(lesson);
+      formattedVocabulary = formatVocabulary(lesson.vocabulary);
+      title = lesson.title;
+      theme = lesson.theme;
+      videoQuery = lesson.videoQuery;
+    }
+    
+    // Combine title and main content
+    const mainContentWithTitle = `${sanitizeHtmlForTelegram(title)}\n\n${sanitizeHtmlForTelegram(formattedContent)}`;
+    
+    // 1. Send the title and main content with image if available
+    if (imageUrl && (imageUrl.startsWith('http://') || imageUrl.startsWith('https://'))) {
+      // Check if combined content exceeds Telegram's caption limit (1024 characters)
+      if (mainContentWithTitle.length <= 1024) {
+        // If it fits, send image with combined title and content as caption
+        if (isContext) {
+          await (recipient as BotContext).replyWithPhoto(
+            imageUrl,
+            {
+              caption: mainContentWithTitle,
+              parse_mode: 'HTML'
+            }
+          );
+        } else {
+          const { bot, chatId } = recipient as { bot: any, chatId: number | string };
+          await bot.api.sendPhoto(
+            chatId, 
+            imageUrl, 
+            {
+              caption: mainContentWithTitle,
+              parse_mode: 'HTML'
+            }
+          );
+        }
+      } else {
+        // If too long, send image with just the title
+        if (isContext) {
+          await (recipient as BotContext).replyWithPhoto(
+            imageUrl,
+            {
+              caption: sanitizeHtmlForTelegram(title),
+              parse_mode: 'HTML'
+            }
+          );
+          
+          // Then send the main content separately
+          await (recipient as BotContext).reply(
+            sanitizeHtmlForTelegram(formattedContent),
+            { parse_mode: 'HTML' }
+          );
+        } else {
+          const { bot, chatId } = recipient as { bot: any, chatId: number | string };
+          await bot.api.sendPhoto(
+            chatId, 
+            imageUrl, 
+            {
+              caption: sanitizeHtmlForTelegram(title),
+              parse_mode: 'HTML'
+            }
+          );
+          
+          // Then send the main content separately
+          await bot.api.sendMessage(
+            chatId,
+            sanitizeHtmlForTelegram(formattedContent),
+            { parse_mode: 'HTML' }
+          );
+        }
+      }
+    } else {
+      // No image, just send text
+      if (isContext) {
+        await (recipient as BotContext).reply(
+          mainContentWithTitle,
+          { parse_mode: 'HTML' }
+        );
+      } else {
+        const { bot, chatId } = recipient as { bot: any, chatId: number | string };
+        await bot.api.sendMessage(
+          chatId,
+          mainContentWithTitle,
+          { parse_mode: 'HTML' }
+        );
+      }
+    }
+    
+    // 2. Send vocabulary separately if available
+    if (formattedVocabulary && formattedVocabulary.length > 0) {
+      if (isContext) {
+        await (recipient as BotContext).reply(
+          sanitizeHtmlForTelegram(formattedVocabulary),
+          { parse_mode: 'HTML' }
+        );
+      } else {
+        const { bot, chatId } = recipient as { bot: any, chatId: number | string };
+        await bot.api.sendMessage(
+          chatId,
+          sanitizeHtmlForTelegram(formattedVocabulary),
+          { parse_mode: 'HTML' }
+        );
+      }
+    }
+    
+    // 3. Get and send related video if available
+    if (videoQuery) {
+      try {
+        const video = await youtubeClient.searchTutorialVideo(videoQuery);
+        if (video) {
+          const videoMessage = `🎥 Related Tutorial Video\n\n<b>${video.title}</b>\n\nWatch this helpful video to learn more about ${theme}:
+          \n<i>Duration: ${video.duration}</i>\n\n${video.url}`;
+          
+          if (isContext) {
+            await (recipient as BotContext).reply(
+              sanitizeHtmlForTelegram(videoMessage),
+              { parse_mode: 'HTML' }
+            );
+          } else {
+            const { bot, chatId } = recipient as { bot: any, chatId: number | string };
+            await bot.api.sendMessage(
+              chatId,
+              sanitizeHtmlForTelegram(videoMessage),
+              { parse_mode: 'HTML' }
+            );
+          }
+        }
+      } catch (videoError) {
+        logger.error(`Error sending video: ${videoError instanceof Error ? videoError.message : String(videoError)}`);
+      }
+    }
+    
+  } catch (error) {
+    logger.error('Error sending lesson content:', error);
+    throw error;
+  }
+}
+
 // Export other utility functions as needed
-export { generateNewLesson, sendLessonContent }; 
+export { generateNewLesson, sendLessonContent, sendLessonToRecipient }; 

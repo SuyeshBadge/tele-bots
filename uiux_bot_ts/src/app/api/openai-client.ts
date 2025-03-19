@@ -187,8 +187,8 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       
    
       
-      logger.info(`LESSON SYSTEM PROMPT: ${systemMessage}`);
-      logger.info(`LESSON USER PROMPT: ${prompt}`);
+      // logger.info(`LESSON SYSTEM PROMPT: ${systemMessage}`);
+      // logger.info(`LESSON USER PROMPT: ${prompt}`);
       
       const response = await openai.chat.completions.create({
         model: settings.OPENAI_MODEL,
@@ -342,9 +342,8 @@ export async function generateLesson(themesToAvoid: string[] = [], quizzesToAvoi
     // Generate lesson content using OpenAI
     const lessonData = await generateLessonContent(themesToAvoid, quizzesToAvoid);
 
-    logger.info(`Lesson ${lessonData.title} ${lessonData.theme}`, {
-      lessonData
-    });
+    // Log only the theme and title, not the entire lesson data
+    logger.info(`Generated lesson: ${lessonData.title} (${lessonData.theme})`);
     
     // Also cache this as a quiz since it contains quiz data
     _quizCache[lessonData.theme.toLowerCase().trim()] = {

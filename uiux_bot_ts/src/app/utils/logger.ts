@@ -180,8 +180,10 @@ export function logActivity(action: string, userId?: number, message?: string, m
     ...metadata,
   });
   
-  // Also log to main logger for visibility
-  logger.debug(`Activity: ${action} | User: ${userId || 'system'} | ${message || ''}`, metadata);
+  // Only log to main logger at debug level
+  if (logger.level === 'debug') {
+    logger.debug(`Activity: ${action} | User: ${userId || 'system'} | ${message || ''}`, metadata);
+  }
 }
 
 // Exposed for OpenAI response logging specifically

@@ -183,8 +183,6 @@ export async function lessonCommand(ctx: BotContext): Promise<void> {
     const userId = ctx.from?.id;
     if (!userId) return;
     
-    logger.info(`User ${userId} requested a new lesson`);
-    
     // Get subscriber
     const subscriber = await getSubscriber(userId);
     if (!subscriber) {
@@ -206,7 +204,6 @@ export async function lessonCommand(ctx: BotContext): Promise<void> {
     // Send lesson
     await sendLesson(ctx, userId);
     
-    logger.info(`Lesson sent to user ${userId}`);
   } catch (error) {
     logger.error('Error in lessonCommand:', error);
     await ctx.reply('Sorry, there was an error processing your request. Please try again later.');
