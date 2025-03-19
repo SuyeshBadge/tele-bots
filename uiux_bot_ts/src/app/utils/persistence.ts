@@ -526,4 +526,91 @@ export async function updateHealthStatus(health: HealthStatus): Promise<HealthSt
     logSupabaseError('updateHealthStatus', error);
     return health; // Return the original data so the bot can continue
   }
+}
+
+/**
+ * Record a video that was sent to a user
+ * @param userId User ID
+ * @param videoId YouTube video ID
+ * @param theme Lesson theme
+ * @returns True if successful
+ */
+export async function recordSentVideo(userId: number, videoId: string, theme: string): Promise<boolean> {
+  try {
+    const supabase = getSupabaseClient();
+    
+    const { error } = await supabase
+      .from('sent_videos')
+      .insert({
+        user_id: userId,
+        video_id: videoId,
+        theme: theme,
+        sent_at: new Date().toISOString()
+      });
+    
+    if (error) {
+      logSupabaseError(`recordSentVideo for user ${userId}`, error);
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    logSupabaseError(`recordSentVideo for user ${userId}`, error);
+    return false;
+  }
+}
+
+/**
+ * Check if a video has been sent to a user before
+ * @param userId User ID
+ * @param videoId YouTube video ID
+ * @returns True if the video was sent before
+ */
+export async function hasVideoBeenSent(userId: number, videoId: string): Promise<boolean> {
+  try {
+    const supabase = getSupabaseClient();
+    
+    const { data, error } = await supabase
+      .from('sent_videos')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('video_id', videoId)
+      .maybeSingle();
+    
+    if (error) {
+      logSupabaseError(`hasVideoBeenSent for user ${userId}`, error);
+      return false;
+    }
+    
+    return !!data;
+  } catch (error) {
+    logSupabaseError(`hasVideoBeenSent for user ${userId}`, error);
+    return false;
+  }
+}
+
+/**
+ * Get list of video IDs already sent to a user
+ * @param userId User ID
+ * @returns Array of previously sent video IDs
+ */
+export async function getSentVideoIds(userId: number): Promise<string[]> {
+  try {
+    const supabase = getSupabaseClient();
+    
+    const { data, error } = await supabase
+      .from('sent_videos')
+      .select('video_id')
+      .eq('user_id', userId);
+    
+    if (error) {
+      logSupabaseError(`getSentVideoIds for user ${userId}`, error);
+      return [];
+    }
+    
+    return data ? data.map(item => item.video_id) : [];
+  } catch (error) {
+    logSupabaseError(`getSentVideoIds for user ${userId}`, error);
+    return [];
+  }
 } 

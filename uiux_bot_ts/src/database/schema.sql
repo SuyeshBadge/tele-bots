@@ -149,4 +149,17 @@ CREATE TABLE IF NOT EXISTS public.health (
     last_error_time TIMESTAMP WITH TIME ZONE,
     version TEXT,
     next_scheduled_lesson TIMESTAMP WITH TIME ZONE
-); 
+);
+
+-- Create table to track sent YouTube videos
+CREATE TABLE IF NOT EXISTS public.sent_videos (
+    id SERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES subscribers(id),
+    video_id TEXT NOT NULL,
+    theme TEXT NOT NULL,
+    sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Add indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_sent_videos_user_id ON public.sent_videos(user_id);
+CREATE INDEX IF NOT EXISTS idx_sent_videos_video_id ON public.sent_videos(video_id); 

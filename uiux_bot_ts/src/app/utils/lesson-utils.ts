@@ -1,6 +1,6 @@
 import { BotContext } from '../bot/handlers/types';
 import { getChildLogger } from './logger';
-import { getSubscriber, incrementLessonCount } from './persistence';
+import { getSubscriber, incrementLessonCount, getSentVideoIds, recordSentVideo } from './persistence';
 import { lessonRepository } from './lesson-repository';
 import { LessonData } from './lesson-types';
 import * as openaiClient from '../api/openai-client';
@@ -324,8 +324,28 @@ async function sendLessonToRecipient(
     // 3. Get and send related video if available
     if (videoQuery) {
       try {
-        const video = await youtubeClient.searchTutorialVideo(videoQuery);
+        // Get user ID from recipient
+        const userId = isContext 
+          ? (recipient as BotContext).from?.id 
+          : parseInt(String((recipient as { bot: any, chatId: number | string }).chatId));
+        
+        if (!userId) {
+          logger.error('Cannot determine user ID for sending video');
+          return;
+        }
+        
+        // Get list of previously sent video IDs for this user
+        const sentVideoIds = await getSubscriber(userId) 
+          ? await getSentVideoIds(userId)
+          : [];
+        
+        // Try with the original video query
+        const video = await youtubeClient.searchTutorialVideo(videoQuery, sentVideoIds);
         if (video) {
+          // Extract video ID from URL
+          const videoIdMatch = video.url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s]+)/);
+          const videoId = videoIdMatch ? videoIdMatch[1] : null;
+          
           const videoMessage = `🎥 Related Tutorial Video\n\n<b>${video.title}</b>\n\nWatch this helpful video to learn more about ${theme}:
           \n<i>Duration: ${video.duration}</i>\n\n${video.url}`;
           
@@ -342,15 +362,128 @@ async function sendLessonToRecipient(
               { parse_mode: 'HTML' }
             );
           }
+          
+          // Record that we sent this video
+          if (videoId) {
+            await recordSentVideo(userId, videoId, theme);
+            logger.info(`Recorded sent video ID: ${videoId} for user ${userId}`);
+          }
+        } else {
+          // If no video found with the specific query, try more aggressive fallbacks
+          await sendVideoWithFallbacks(recipient, theme, isContext);
         }
       } catch (videoError) {
         logger.error(`Error sending video: ${videoError instanceof Error ? videoError.message : String(videoError)}`);
+        // Still try fallbacks even after error
+        try {
+          await sendVideoWithFallbacks(recipient, theme, isContext);
+        } catch (fallbackError) {
+          logger.error(`Error sending fallback video: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`);
+        }
+      }
+    } else {
+      // No videoQuery provided, try using the theme directly with fallbacks
+      try {
+        await sendVideoWithFallbacks(recipient, theme, isContext);
+      } catch (videoError) {
+        logger.error(`Error sending fallback video: ${videoError instanceof Error ? videoError.message : String(videoError)}`);
       }
     }
     
   } catch (error) {
     logger.error('Error sending lesson content:', error);
     throw error;
+  }
+}
+
+/**
+ * Try multiple approaches to find and send a relevant video
+ * @param recipient - The recipient (context or bot+chatId)
+ * @param theme - The lesson theme
+ * @param isContext - Whether recipient is a context
+ */
+async function sendVideoWithFallbacks(
+  recipient: BotContext | { bot: any, chatId: number | string },
+  theme: string,
+  isContext: boolean
+): Promise<boolean> {
+  try {
+    // Get user ID from recipient
+    const userId = isContext 
+      ? (recipient as BotContext).from?.id 
+      : parseInt(String((recipient as { bot: any, chatId: number | string }).chatId));
+    
+    if (!userId) {
+      logger.error('Cannot determine user ID for sending video');
+      return false;
+    }
+    
+    // Get list of previously sent video IDs for this user
+    const sentVideoIds = await getSubscriber(userId) 
+      ? await getSentVideoIds(userId)
+      : [];
+    
+    // List of search terms to try in order
+    const searchTerms = [
+      theme,
+      `${theme} design`,
+      `${theme} UI UX`,
+      "UI UX design basics",
+      "design principles",
+      "user experience fundamentals"
+    ];
+    
+    // Try each search term until we find a video
+    for (const term of searchTerms) {
+      try {
+        // Try to get multiple videos
+        const videos = await youtubeClient.searchTutorialVideos(term, sentVideoIds, 3);
+        
+        if (videos.length > 0) {
+          // Pick the first video that hasn't been sent
+          const video = videos[0];
+          
+          // Extract video ID from URL
+          const videoIdMatch = video.url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s]+)/);
+          const videoId = videoIdMatch ? videoIdMatch[1] : null;
+          
+          if (videoId) {
+            // Send the video
+            const videoMessage = `🎥 Related Tutorial Video\n\n<b>${video.title}</b>\n\nWatch this helpful video to learn more about ${theme}:
+            \n<i>Duration: ${video.duration}</i>\n\n${video.url}`;
+            
+            if (isContext) {
+              await (recipient as BotContext).reply(
+                sanitizeHtmlForTelegram(videoMessage),
+                { parse_mode: 'HTML' }
+              );
+            } else {
+              const { bot, chatId } = recipient as { bot: any, chatId: number | string };
+              await bot.api.sendMessage(
+                chatId,
+                sanitizeHtmlForTelegram(videoMessage),
+                { parse_mode: 'HTML' }
+              );
+            }
+            
+            // Record that we sent this video
+            await recordSentVideo(userId, videoId, theme);
+            
+            logger.info(`Successfully sent video for term: ${term}, video ID: ${videoId}`);
+            return true;
+          }
+        }
+      } catch (error) {
+        logger.error(`Error trying video fallback term "${term}": ${error instanceof Error ? error.message : String(error)}`);
+        // Continue to next term
+      }
+    }
+    
+    logger.warn(`Couldn't find any suitable videos after trying all fallback terms for theme: ${theme}`);
+    return false;
+  } catch (error) {
+    logger.error(`Error in sendVideoWithFallbacks: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
   }
 }
 

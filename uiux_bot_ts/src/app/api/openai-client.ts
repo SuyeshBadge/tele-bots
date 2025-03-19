@@ -101,69 +101,74 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
     let theme = '';
     try {
       // Generate the prompt for the API call - streamlined for better content
-
-      const prompt = (
-        `Generate a beginner-friendly UI/UX design lesson with a **clear, engaging structure**. Follow these strict guidelines:\n\n` +
+      const themesToAvoidList = themesToAvoid.filter(Boolean).map(t => `- ${t}`).join('\n');
+      const quizzesToAvoidList = quizzesToAvoid.filter(Boolean).map(q => `- ${q}`).join('\n');
       
-        `1️⃣ **Title**: A short, engaging title (max 10 words).\n\n` +
-        `2️⃣ **Theme**: The theme of the lesson (max 10 words). Strictly avoid generating lessons on these recently covered topics:\n${themesToAvoid.filter(Boolean).map(t => `- ${t}`).join('\n')}\n\n` +
+      const prompt = `You are an expert UI/UX educator tasked with creating an engaging, beginner-friendly lesson following a structured, concise format. Carefully consider the following guidelines:
       
-        `2️⃣ **Key Learning Points** (5-7 total):\n` +
-        `   - Each must start with a unique, relevant emoji (🎨 for colors, 🖱️ for interaction, 📱 for mobile, etc.).\n` +
-        `   - Each point must be **1-2 concise sentences (max 20 words)** to ensure clarity.\n` +
-        `   - Avoid repeating emojis and vary the sentence structures.\n\n` +
-        `   - Use emojis to make the lesson more engaging and fun.\n\n` +
-        `   - Add a fun fact as a point to make the lesson more engaging.\n\n` +
-        
-        `3️⃣ **Real-World Example**:\n` +
-        `   - Provide a URL to a real website or application that demonstrates this concept in action.\n` +
-        `   - Add a brief description (max 20 words) explaining why this example is relevant.\n` +
-        `   - Choose well-known, reputable sites that clearly showcase the principles.\n\n` +
-        
-        `4️⃣ **Vocabulary Terms** (3-5 total):\n` +
-        `   - Include key terminology related to the topic.\n` +
-        `   - Each term should have a clear, concise definition (max 15 words).\n` +
-        `   - Include a short, relatable real-world example for each term (max 15 words).\n` +
-        `   - Choose terms that are essential for beginners to understand the topic.\n\n` +
+      1️⃣ Title:
+      - Craft a concise, captivating title (max 10 words).
       
-        `5️⃣ **Quiz Question**:\n` +
-        `   - A multiple-choice question with **exactly 4 answer options**.\n` +
-        `   - The question must be **clear, relevant, and beginner-friendly**.\n` +
-        `   - Incorrect answers should be **plausible but clearly incorrect** (no trick questions).\n` +
-        `   - Strictly avoid generating quizzes on any of these recently covered quizzes:\n${quizzesToAvoid.filter(Boolean).map(q => `- ${q}`).join('\n')}\n\n` +
+      2️⃣ Theme:
+      - Specify the UI/UX lesson theme clearly (max 10 words).
+      - Strictly avoid recently covered themes and topics:
+      ${themesToAvoidList}
       
-        `6️⃣ **Video Topic**:\n` +
-        `   - Suggest a specific, focused search query for finding a relevant tutorial video.\n` +
-        `   - The query should be 3-6 words long and highly specific to the lesson topic.\n` +
-        `   - Strictly avoid generating video queries on any of these recently covered themes:\n${themesToAvoid.filter(Boolean).map(t => `- ${t}`).join('\n')}\n\n` +
+      3️⃣ Key Learning Points (5-7 total):
+      - Begin each point with a unique, topic-relevant emoji (🎨 for colors, 🖱️ for interaction, 📱 for mobile, etc.).
+      - Points should be clear, concise, beginner-friendly (max 20 words each).
+      - Include one engaging, design-related fun fact.
+      - Avoid repetition of emojis or sentence structure.
       
-        `7️⃣ **Explanations for Each Answer**:\n` +
-        `   - Explain why the **correct answer is right** in a clear, friendly way (max 40 words).\n` +
-        `   - Explain why each **wrong answer is incorrect** in a simple, non-technical way (max 30 words each).\n\n` +
+      4️⃣ Real-World Example:
+      - Provide a valid URL (excluding apple.com) demonstrating the lesson’s concept effectively.
+      - Clearly and concisely explain its relevance to the topic (max 20 words).
       
-        `🚀 **Response Format (JSON, always valid and properly formatted):**\n` +
-        `{\n` +
-        `  "theme": "string (UI/UX Design, Color Theory, etc.)",\n` +
-        `  "title": "string (max 10 words)",\n` +
-        `  "content_points": ["string (each must start with a unique emoji, max 20 words)"],\n` +
-        `  "example_link": {"url": "valid URL", "description": "string (max 20 words)"},\n` +
-        `  "vocabulary_terms": [{"term": "string", "definition": "string (max 15 words)", "example": "string (max 15 words)"}],\n` +
-        `  "quiz_question": "string",\n` +
-        `  "quiz_options": ["string", "string", "string", "string"],\n` +
-        `  "correct_option_index": integer (0-3),\n` +
-        `  "explanation": "string (max 40 words, explaining the correct answer)",\n` +
-        `  "option_explanations": ["string (max 30 words)", "string (max 30 words)", "string (max 30 words)", "string (max 30 words)"},\n` +
-        `  "video_query": "string (3-6 words for YouTube search)"\n` +
-        `}\n\n` +
+      5️⃣ Vocabulary Terms (3-5 total):
+      - Include essential beginner terms clearly defined (max 15 words each).
+      - Provide concise, relatable real-world examples (max 15 words each).
       
-        `⚠️ **Important Guidelines**:\n` +
-        `- Ensure the response is always **valid JSON** (properly formatted, with no missing brackets or escape errors).\n` +
-        `- Use **engaging, friendly, and beginner-appropriate language** (avoid jargon and keep it fun!).\n` +
-        `- Keep answers **concise, structured, and varied** (no repeated emojis or phrasing).\n` +
-        `- Follow **word limits strictly** to maintain readability and consistency.\n` +
-        `- Make vocabulary examples relatable to real design situations that beginners can understand.\n` +
-        `- For example links, use real websites or applications that clearly showcase the concept in action. Send the exact URL to the example that is relevant to the lesson except apple.com .` 
-      );
+      6️⃣ Quiz Question:
+      - Develop one beginner-level, multiple-choice question relevant to the lesson.
+      - Provide exactly 4 plausible options, clearly incorrect yet relevant.
+      - Avoid recently covered quiz topics:
+      ${quizzesToAvoidList}
+      
+      7️⃣ Answer Explanations:
+      - Clearly justify the correct answer, focusing on clarity and beginner-friendliness (max 40 words).
+      - Provide concise, simple explanations why each incorrect option is incorrect (max 30 words each).
+      
+      8️⃣ Video Topic:
+      - Suggest a highly focused YouTube search query (3-6 words) directly relevant to the lesson.
+      - Strictly avoid previously covered themes:
+      ${themesToAvoidList}
+      
+      🚀 Response Format (Always Provide Valid JSON):
+      {
+        "theme": "string (max 10 words)",
+        "title": "string (max 10 words)",
+        "content_points": ["string (unique emoji, max 20 words each)"],
+        "example_link": {
+          "url": "valid URL (excluding apple.com)",
+          "description": "string (max 20 words)"
+        },
+        "vocabulary_terms": [
+          {"term": "string", "definition": "string (max 15 words)", "example": "string (max 15 words)"}
+        ],
+        "quiz_question": "string (clear, beginner-friendly)",
+        "correct_option_index": integer (0-3),
+        "explanation": "string (max 40 words, explaining the correct answer)",
+        "quiz_options": ["string (plausible but incorrect or correct)"],
+        "option_explanations": ["string (max 30 words each)"],
+        "video_query": "string (3-6 words, highly specific)"
+      }
+      
+      ⚠️ Critical Guidelines:
+      - Provide strictly valid JSON responses.
+      - Maintain a friendly, clear, engaging tone suitable for absolute beginners.
+      - Adhere strictly to all provided word limits.
+      - Avoid duplication of emojis or language structures.
+      - Ensure clarity and practical applicability of all provided examples.`;
       
 
       // Make the API call with better prompt focused on emojis
