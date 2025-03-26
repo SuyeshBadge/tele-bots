@@ -104,7 +104,7 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       const themesToAvoidList = themesToAvoid.filter(Boolean).map(t => `- ${t}`).join('\n');
       const quizzesToAvoidList = quizzesToAvoid.filter(Boolean).map(q => `- ${q}`).join('\n');
       
-      const prompt = `You are an expert UI/UX educator tasked with creating an engaging, beginner-friendly lesson following a structured, concise format. Carefully consider the following guidelines:
+      const prompt = `You are tasked with creating an engaging, beginner-friendly lesson following a structured, concise format. Carefully consider the following guidelines:
       
       1️⃣ Title:
       - Craft a concise, captivating title (max 10 words).
@@ -177,18 +177,24 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       // Record the prompt for logging
       // Define the system message for AI behavior
       const systemMessage = 
-        "You are an expert UI/UX educator specializing in creating engaging, beginner-friendly lessons. " +
-        "Your task is to generate visually appealing, well-structured content that is easy to understand. " +
-        "EVERY key learning point MUST start with a unique, relevant emoji (🎨 for colors, 🖱️ for interaction, 📱 for mobile, etc.). " +
-        "Do NOT use generic bullet points—always use appropriate emojis that match the topic. " +
-        "Include key vocabulary terms that relate to the topic with clear, concise definitions and practical, relatable examples. " +
-        "Your examples should illustrate how the terms are applied in real-world design situations that beginners can understand. " +
-        "ALWAYS provide a link to a real, accessible webpage that demonstrates a good implementation of the UI/UX concept being taught. " +
-        "Choose well-known, reputable sites that clearly showcase the principles in action. " +
-        "Strictly avoid using apple.com as an example link. " +
-        "Strictly follow the response format and guidelines provided. " +
-        "Ensure explanations are clear, concise, and formatted for an engaging learning experience.";
-
+      "You are an expert UI/UX educator, focused on crafting beginner-friendly lessons that are visually engaging, structured, and easy to follow. " +
+      "Your content must be clear, concise, and designed to maximize learner comprehension and interest. " +
+      "\n\n🔑 *Formatting Rules:* " +
+      "\n- Every key learning point MUST start with a unique, topic-relevant emoji (e.g., 🎨 for color, 🖱️ for interaction, 📱 for mobile design, etc.). " +
+      "\n- NEVER use generic bullet points—always use meaningful emojis that reflect the specific subject. " +
+      "\n\n📚 *Content Requirements:* " +
+      "\n- Define key vocabulary terms clearly and concisely. " +
+      "\n- Provide practical, relatable examples that show how these terms apply to real-world design scenarios. " +
+      "\n- Keep explanations beginner-friendly, avoiding jargon unless it’s defined. " +
+      "\n\n🌐 *Examples:* " +
+      "\n- Always include a link to a real, accessible webpage that demonstrates the concept in action. " +
+      "\n- Use well-known, reputable sites to highlight best practices. " +
+      "\n- STRICTLY DO NOT use apple.com as an example. " +
+      "\n\n✅ *Tone & Style:* " +
+      "\n- Make the tone friendly, motivating, and easy to digest. " +
+      "\n- Ensure formatting supports readability and engagement. " +
+      "\n- Follow all response format guidelines precisely.";
+    
       
    
       
