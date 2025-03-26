@@ -111,7 +111,7 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       
       2️⃣ Theme:
       - Specify the UI/UX lesson theme clearly (max 10 words).
-      - Strictly avoid recently covered themes and topics:
+      - I already know these topics so no need to repeat them:
       ${themesToAvoidList}
       
       3️⃣ Key Learning Points (5-7 total):
@@ -131,7 +131,7 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       6️⃣ Quiz Question:
       - Develop one beginner-level, multiple-choice question relevant to the lesson.
       - Provide exactly 4 plausible options, clearly incorrect yet relevant.
-      - Avoid recently covered quiz topics:
+      - I already know these quiz topics so no need to repeat them:
       ${quizzesToAvoidList}
       
       7️⃣ Answer Explanations:
@@ -140,7 +140,7 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       
       8️⃣ Video Topic:
       - Suggest a highly focused YouTube search query (3-6 words) directly relevant to the lesson.
-      - Strictly avoid previously covered themes:
+      - I already know these video topics so no need to repeat them:
       ${themesToAvoidList}
       
       🚀 Response Format (Always Provide Valid JSON):
