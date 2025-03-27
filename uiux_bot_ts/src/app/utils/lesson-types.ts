@@ -43,5 +43,5 @@ export interface LessonData {
     url: string;
     description: string;
   };
-  videoQuery?: string;
+  videoQuery?: string[];
 } 

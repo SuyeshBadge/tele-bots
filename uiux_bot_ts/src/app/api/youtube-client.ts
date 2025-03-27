@@ -30,19 +30,11 @@ type VideoListResult = youtube_v3.Schema$VideoListResponse;
  * @returns Array of video information or empty array if none found
  */
 export async function searchTutorialVideos(
-  theme: string, 
+  searchQueries: string[], 
   excludeIds: string[] = [], 
   maxResults: number = 3
 ): Promise<YouTubeVideo[]> {
   try {
-    // Try multiple search queries in order of specificity
-    const searchQueries = [
-      `${theme} ui ux design tutorial short`,
-      `${theme} ui ux tutorial`,
-      `${theme} design tutorial`,
-      `${theme} tutorial`
-    ];
-    
     const foundVideos: YouTubeVideo[] = [];
     
     // Try each query until we find suitable videos
@@ -131,7 +123,7 @@ export async function searchTutorialVideos(
                             undefined;
 
         // Add this video to our results
-        logger.info(`Found suitable video for "${theme}" with query "${searchQuery}": ${item.snippet?.title}`);
+        logger.info(`Found suitable video for query "${searchQuery}": ${item.snippet?.title}`);
         foundVideos.push({
           url: `https://www.youtube.com/watch?v=${videoId}`,
           title: item.snippet?.title || 'UI/UX Design Tutorial',
@@ -147,7 +139,7 @@ export async function searchTutorialVideos(
       }
     }
     
-    logger.info(`Found ${foundVideos.length} videos for theme: ${theme}`);
+    logger.info(`Found ${foundVideos.length} videos for queries: ${searchQueries.join(', ')}`);
     return foundVideos;
   } catch (error) {
     logger.error(`Error searching for tutorial videos: ${error instanceof Error ? error.message : String(error)}`);
@@ -161,8 +153,8 @@ export async function searchTutorialVideos(
  * @param excludeIds Array of video IDs to exclude from results
  * @returns Video information if found, null otherwise
  */
-export async function searchTutorialVideo(theme: string, excludeIds: string[] = []): Promise<YouTubeVideo | null> {
-  const videos = await searchTutorialVideos(theme, excludeIds, 1);
+export async function searchTutorialVideo(query: string, excludeIds: string[] = []): Promise<YouTubeVideo | null> {
+  const videos = await searchTutorialVideos([query], excludeIds, 1);
   return videos.length > 0 ? videos[0] : null;
 }
 

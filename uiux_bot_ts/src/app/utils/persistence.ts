@@ -269,26 +269,26 @@ export async function deleteSubscriber(id: number): Promise<boolean> {
     const supabase = getSupabaseClient();
     
     // First, delete any related records in the subscriber_bots table
-    const { error: relatedError } = await supabase
-      .from('subscriber_bots')
-      .delete()
-      .eq('subscriber_id', id);
+    // const { error: relatedError } = await supabase
+    //   .from('subscriber_bots')
+    //   .delete()
+    //   .eq('subscriber_id', id);
     
-    if (relatedError) {
-      logSupabaseError(`deleteSubscriber (related records) for id ${id}`, relatedError);
-      // Continue anyway and try to delete the subscriber
-    }
+    // if (relatedError) {
+    //   logSupabaseError(`deleteSubscriber (related records) for id ${id}`, relatedError);
+    //   // Continue anyway and try to delete the subscriber
+    // }
     
     // Then delete the subscriber
-    const { error } = await supabase
-      .from('subscribers')
-      .delete()
-      .eq('id', id);
+  //    const { error } = await supabase
+    //   .from('subscribers')
+    //   .delete()
+    //   .eq('id', id);
     
-    if (error) {
-      logSupabaseError(`deleteSubscriber for id ${id}`, error);
-      return false;
-    }
+    // if (error) {
+    //   logSupabaseError(`deleteSubscriber for id ${id}`, error);
+    //   return false;
+    // }
     
     return true;
   } catch (error) {

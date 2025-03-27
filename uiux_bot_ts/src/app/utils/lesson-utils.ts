@@ -170,13 +170,15 @@ async function sendLessonContent(ctx: BotContext, lesson: LessonData): Promise<v
     
     // Get and send related video if available
     if (lesson.videoQuery) {
-      const video = await youtubeClient.searchTutorialVideo(lesson.videoQuery);
-      if (video) {
-        await ctx.reply(`🎥 Related Tutorial Video\n\n<b>${video.title}</b>\n\nWatch this helpful video to learn more about ${lesson.theme}:
+      lesson.videoQuery.forEach(async (query) => {
+        const video = await youtubeClient.searchTutorialVideo(query);
+        if (video) {
+          await ctx.reply(`🎥 Related Tutorial Video\n\n<b>${video.title}</b>\n\nWatch this helpful video to learn more about ${lesson.theme}:
           \n<i> Duration: ${video.duration}</i>\n\n${video.url}`, {
           parse_mode: 'HTML',
         });
-      }
+        }
+      });
     }
   } catch (error) {
     logger.error('Error sending lesson content:', error);
@@ -203,7 +205,7 @@ async function sendLessonToRecipient(
     let formattedVocabulary: string = '';
     let title: string;
     let theme: string;
-    let videoQuery: string | undefined;
+    let videoQuery: string[] | undefined;
     
     // Handle different lesson data structures
     if ('content' in lesson) {
@@ -340,7 +342,8 @@ async function sendLessonToRecipient(
           : [];
         
         // Try with the original video query
-        const video = await youtubeClient.searchTutorialVideo(videoQuery, sentVideoIds);
+        videoQuery.forEach(async (query) => {
+          const video = await youtubeClient.searchTutorialVideo(query, sentVideoIds);
         if (video) {
           // Extract video ID from URL
           const videoIdMatch = video.url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([^&\s]+)/);
@@ -372,6 +375,7 @@ async function sendLessonToRecipient(
           // If no video found with the specific query, try more aggressive fallbacks
           await sendVideoWithFallbacks(recipient, theme, isContext);
         }
+      });
       } catch (videoError) {
         logger.error(`Error sending video: ${videoError instanceof Error ? videoError.message : String(videoError)}`);
         // Still try fallbacks even after error
@@ -437,7 +441,7 @@ async function sendVideoWithFallbacks(
     for (const term of searchTerms) {
       try {
         // Try to get multiple videos
-        const videos = await youtubeClient.searchTutorialVideos(term, sentVideoIds, 3);
+        const videos = await youtubeClient.searchTutorialVideos([term], sentVideoIds, 3);
         
         if (videos.length > 0) {
           // Pick the first video that hasn't been sent

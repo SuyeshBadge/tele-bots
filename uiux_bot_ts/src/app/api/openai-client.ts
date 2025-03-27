@@ -73,7 +73,7 @@ interface LessonData {
   option_explanations?: string[];
   vocabulary_terms?: {term: string, definition: string, example: string}[]; // Array of vocabulary terms with definitions and examples
   example_link?: {url: string, description: string}; // Link to a real-world example implementation
-  video_query?: string; // Search query for YouTube
+  video_query?: string[]; // Search query for YouTube
 }
 
 /**
@@ -101,22 +101,22 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
     let theme = '';
     try {
       // Generate the prompt for the API call - streamlined for better content
-      const themesToAvoidList = themesToAvoid.filter(Boolean).map(t => `- ${t}`).join('\n');
-      const quizzesToAvoidList = quizzesToAvoid.filter(Boolean).map(q => `- ${q}`).join('\n');
+      const themesToAvoidList = themesToAvoid.filter(Boolean).map(t => ` ${t}`).join(',');
+      const quizzesToAvoidList = quizzesToAvoid.filter(Boolean).map(q => ` ${q}`).join(',');
       
-      const prompt = `You are tasked with creating an engaging, beginner-friendly lesson following a structured, concise format. Carefully consider the following guidelines:
+      const prompt = `You are tasked with creating an engaging, a detailed UI/UX lesson following a structured, concise format. Carefully consider the following guidelines:
       
       1️⃣ Title:
       - Craft a concise, captivating title (max 10 words).
       
       2️⃣ Theme:
       - Specify the UI/UX lesson theme clearly (max 10 words).
-      - I already know these topics so no need to repeat them:
-      ${themesToAvoidList}
+      - I already know these topics so strictly avoid them:
+      { ${themesToAvoidList} }
       
       3️⃣ Key Learning Points (5-7 total):
       - Begin each point with a unique, topic-relevant emoji (🎨 for colors, 🖱️ for interaction, 📱 for mobile, etc.).
-      - Points should be clear, concise, beginner-friendly (max 20 words each).
+      - Points should be clear, concise (max 20 words each).
       - Include one engaging, design-related fun fact.
       - Avoid repetition of emojis or sentence structure.
       
@@ -125,23 +125,23 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       - Clearly and concisely explain its relevance to the topic (max 20 words).
       
       5️⃣ Vocabulary Terms (3-5 total):
-      - Include essential beginner terms clearly defined (max 15 words each).
+      - Include essential terms clearly defined (max 15 words each).
       - Provide concise, relatable real-world examples (max 15 words each).
       
       6️⃣ Quiz Question:
-      - Develop one beginner-level, multiple-choice question relevant to the lesson.
+      - Develop one intermediate-level, multiple-choice question relevant to the lesson.
       - Provide exactly 4 plausible options, clearly incorrect yet relevant.
-      - I already know these quiz topics so no need to repeat them:
-      ${quizzesToAvoidList}
+      - I already know these quiz topics so strictly avoid them:
+      { ${quizzesToAvoidList} }
       
       7️⃣ Answer Explanations:
-      - Clearly justify the correct answer, focusing on clarity and beginner-friendliness (max 40 words).
+      - Clearly justify the correct answer, focusing on clarity and intermediate-friendliness (max 40 words).
       - Provide concise, simple explanations why each incorrect option is incorrect (max 30 words each).
       
       8️⃣ Video Topic:
       - Suggest a highly focused YouTube search query (3-6 words) directly relevant to the lesson.
-      - I already know these video topics so no need to repeat them:
-      ${themesToAvoidList}
+      - I already know these video topics so strictly avoid them:
+      { ${themesToAvoidList} }
       
       🚀 Response Format (Always Provide Valid JSON):
       {
@@ -155,17 +155,17 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
         "vocabulary_terms": [
           {"term": "string", "definition": "string (max 15 words)", "example": "string (max 15 words)"}
         ],
-        "quiz_question": "string (clear, beginner-friendly)",
+        "quiz_question": "string (clear, intermediate-friendly)",
         "correct_option_index": integer (0-3),
         "explanation": "string (max 40 words, explaining the correct answer)",
         "quiz_options": ["string (plausible but incorrect or correct)"],
         "option_explanations": ["string (max 30 words each)"],
-        "video_query": "string (3-6 words, highly specific)"
+        "video_query": " an array of strings (3-6 words, highly specific)"
       }
       
       ⚠️ Critical Guidelines:
       - Provide strictly valid JSON responses.
-      - Maintain a friendly, clear, engaging tone suitable for absolute beginners.
+      - Maintain a friendly, clear, engaging tone suitable for intermediate-level learners.
       - Adhere strictly to all provided word limits.
       - Avoid duplication of emojis or language structures.
       - Ensure clarity and practical applicability of all provided examples.`;
@@ -177,7 +177,7 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       // Record the prompt for logging
       // Define the system message for AI behavior
       const systemMessage = 
-      "You are an expert UI/UX educator, focused on crafting beginner-friendly lessons that are visually engaging, structured, and easy to follow. " +
+      "You are an expert UI/UX educator, focused on crafting detailed lessons that are visually engaging, structured, and easy to follow. " +
       "Your content must be clear, concise, and designed to maximize learner comprehension and interest. " +
       "\n\n🔑 *Formatting Rules:* " +
       "\n- Every key learning point MUST start with a unique, topic-relevant emoji (e.g., 🎨 for color, 🖱️ for interaction, 📱 for mobile design, etc.). " +
@@ -185,7 +185,7 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       "\n\n📚 *Content Requirements:* " +
       "\n- Define key vocabulary terms clearly and concisely. " +
       "\n- Provide practical, relatable examples that show how these terms apply to real-world design scenarios. " +
-      "\n- Keep explanations beginner-friendly, avoiding jargon unless it’s defined. " +
+      "\n- Keep explanations intermediate-friendly, avoiding jargon unless it’s defined. " +
       "\n\n🌐 *Examples:* " +
       "\n- Always include a link to a real, accessible webpage that demonstrates the concept in action. " +
       "\n- Use well-known, reputable sites to highlight best practices. " +
@@ -195,11 +195,12 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       "\n- Ensure formatting supports readability and engagement. " +
       "\n- Follow all response format guidelines precisely.";
     
+
       
    
       
-      // logger.info(`LESSON SYSTEM PROMPT: ${systemMessage}`);
-      // logger.info(`LESSON USER PROMPT: ${prompt}`);
+      logger.info(`LESSON SYSTEM PROMPT: ${systemMessage}`);
+      logger.info(`LESSON USER PROMPT: ${prompt}`);
       
       const response = await openai.chat.completions.create({
         model: settings.OPENAI_MODEL,
@@ -344,7 +345,7 @@ export interface LessonSections {
   explanation: string;
   optionExplanations: string[];
   vocabulary: {term: string, definition: string, example: string}[];
-  videoQuery?: string;
+  videoQuery?: string[];
   example_link?: {url: string, description: string};
 }
 

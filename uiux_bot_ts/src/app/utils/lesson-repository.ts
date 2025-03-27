@@ -29,7 +29,7 @@ interface LessonDBModel {
     url: string;
     description: string;
   };
-  video_query?: string;
+  video_query?: string[];
 }
 
 /**
