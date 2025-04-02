@@ -18,6 +18,7 @@ A TypeScript Telegram bot that sends UI/UX lessons twice daily, with quizzes and
 - Supabase account
 - Telegram Bot Token (from BotFather)
 - OpenAI API Key (optional, for image generation)
+- Claude API Key (optional, for lesson generation)
 
 ## 🔧 Setup and Installation
 
@@ -47,6 +48,7 @@ A TypeScript Telegram bot that sends UI/UX lessons twice daily, with quizzes and
    SUPABASE_URL=your_supabase_url
    SUPABASE_SERVICE_KEY=your_supabase_service_key
    OPENAI_API_KEY=your_openai_api_key (optional)
+   CLAUDE_API_KEY=your_claude_api_key (optional)
    ```
 
 5. **Build the application**:

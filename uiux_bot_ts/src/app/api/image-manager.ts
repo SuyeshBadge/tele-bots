@@ -60,6 +60,37 @@ interface ImageStrategy {
 }
 
 /**
+ * Interface for Pexels API response
+ */
+interface PexelsPhoto {
+  id: number;
+  width: number;
+  height: number;
+  url: string;
+  photographer: string;
+  photographer_url: string;
+  src: {
+    original: string;
+    large2x: string;
+    large: string;
+    medium: string;
+    small: string;
+    portrait: string;
+    landscape: string;
+    tiny: string;
+  };
+  alt: string;
+}
+
+interface PexelsResponse {
+  page: number;
+  per_page: number;
+  photos: PexelsPhoto[];
+  total_results: number;
+  next_page?: string;
+}
+
+/**
  * Strategy to get images from Unsplash API
  */
 class UnsplashStrategy implements ImageStrategy {
@@ -146,7 +177,7 @@ class PexelsStrategy implements ImageStrategy {
       const searchTerm = `UI/UX ${theme}`;
       logger.info(`Searching Pexels for: ${searchTerm}`);
       
-      const response = await axios.get('https://api.pexels.com/v1/search', {
+      const response = await axios.get<PexelsResponse>('https://api.pexels.com/v1/search', {
         params: {
           query: searchTerm,
           per_page: 1,
@@ -320,7 +351,7 @@ export class ImageManager {
       
       // Save the image to a file
       const writer = createWriteStream(savePath);
-      await pipelineAsync(response.data, writer);
+      await pipelineAsync(response.data as NodeJS.ReadableStream, writer);
       
       logger.info(`Successfully saved image to: ${savePath}`);
       

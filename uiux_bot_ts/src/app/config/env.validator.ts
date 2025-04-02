@@ -33,6 +33,11 @@ export const envSchema = z.object({
   OPENAI_MODEL: z.string().default('gpt-4-turbo'),
   DISABLE_OPENAI: z.string().transform(parseBoolean).default('False'),
   
+  // Claude configuration
+  CLAUDE_API_KEY: z.string().optional(),
+  CLAUDE_MODEL: z.string().default('claude-3-haiku-20240307'),
+  DISABLE_CLAUDE: z.string().transform(parseBoolean).default('False'),
+  
   // Logging
   LOG_LEVEL: z.string().default('INFO'),
   LOG_FILE: z.string().default('./logs/bot.log'),
@@ -89,6 +94,9 @@ export function validateEnv(): EnvConfig {
       OPENAI_API_KEY: process.env.OPENAI_API_KEY,
       OPENAI_MODEL: process.env.OPENAI_MODEL,
       DISABLE_OPENAI: process.env.DISABLE_OPENAI || 'False',
+      CLAUDE_API_KEY: process.env.CLAUDE_API_KEY,
+      CLAUDE_MODEL: process.env.CLAUDE_MODEL,
+      DISABLE_CLAUDE: process.env.DISABLE_CLAUDE || 'False',
       LOG_LEVEL: process.env.LOG_LEVEL,
       LOG_FILE: process.env.LOG_FILE,
       MORNING_LESSON_SCHEDULE: process.env.MORNING_LESSON_SCHEDULE,

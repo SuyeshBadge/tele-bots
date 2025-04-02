@@ -4,7 +4,7 @@ import { logActivity } from '../../utils/logger';
 import { activeQuizzes, progressRepository } from './session';
 import { getSubscriber } from '../../utils/persistence';
 import { incrementQuizCount } from '../../utils/persistence';
-import * as openaiClient from '../../api/openai-client';
+import * as claudeClient from '../../api/claude-client';
 
 const logger = getChildLogger('quiz-handlers');
 
@@ -282,7 +282,7 @@ export async function sendQuiz(ctx: BotContext, userId: number, theme: string): 
     
     // Generate quiz - this now uses cached data if available
     const startTime = Date.now();
-    const quiz = await openaiClient.generateQuiz(theme);
+    const quiz = await claudeClient.generateQuiz(theme);
     const elapsedTime = Date.now() - startTime;
     const fromCache = elapsedTime < 100; // Likely from cache if it took less than 100ms
     

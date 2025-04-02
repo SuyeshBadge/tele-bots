@@ -24,11 +24,28 @@ import { sanitizeHtmlForTelegram } from '../utils/telegram-utils';
 import { BotContext, SessionData } from './handlers/types';
 import { startCommand, unsubscribeCommand, helpCommand, lessonCommand } from './handlers/utility-handlers';
 import { onPollAnswer } from './handlers/quiz-handlers';
-import { LessonSections } from '../api/openai-client';
+import { LessonSections } from '../api/claude-client';
 import { sendLessonToRecipient, formatLessonContent, formatVocabulary } from '../utils/lesson-utils';
+import { getImageForLesson } from '../api/image-manager';
 
 // Configure logger
 const logger = getChildLogger('bot');
+
+// Initialize bot with session middleware
+const bot = new Bot<BotContext>(settings.TELEGRAM_BOT_TOKEN);
+bot.use(session({ 
+  initial: (): SessionData => ({
+    dailyLessonCount: 0,
+    lastLessonTime: new Date(),
+    lastTheme: undefined,
+    waitingForQuizAnswer: false,
+    quizCorrectAnswer: undefined,
+    quizOptions: undefined
+  })
+}));
+
+// Import Claude client for lesson generation
+import claudeClient from '../api/claude-client';
 
 /**
  * Main bot class for UI/UX Lessons
@@ -163,10 +180,6 @@ export class UIUXLessonBot {
       return;
     }
     
-    // Import the openai client dynamically to avoid circular dependencies
-    const { generateLesson, generateQuiz } = await import('../api/openai-client');
-    const { getImageForLesson } = await import('../api/image-manager');
-    
     // Generate lesson content, avoiding recent themes and quizzes
     try {
       // Get recent themes from the last month to avoid repetition
@@ -174,7 +187,7 @@ export class UIUXLessonBot {
       const recentQuizzes = await lessonRepository.getRecentQuizzes();
       
       // Generate lesson with themes to avoid
-      const lessonSections = await generateLesson(recentThemes, recentQuizzes);
+      const lessonSections = await claudeClient.generateLesson(recentThemes, recentQuizzes);
       
       // Get an image for the lesson
       let imageUrl = null;
@@ -206,7 +219,7 @@ export class UIUXLessonBot {
           setTimeout(async () => {
             try {
               // Generate quiz for the lesson
-              const quizData = await generateQuiz(lessonSections.theme);
+              const quizData = await claudeClient.generateQuiz(lessonSections.theme);
               
               if (!quizData || !quizData.question) {
                 logger.error(`Failed to generate quiz for theme: ${lessonSections.theme}`);
@@ -410,5 +423,30 @@ export async function startBot(): Promise<void> {
   } catch (error) {
     logger.error(`Error starting bot: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
+  }
+}
+
+/**
+ * Generate and send a lesson to a recipient
+ */
+async function generateAndSendLesson(recipientId: number, themesToAvoid: string[] = [], quizzesToAvoid: string[] = []): Promise<void> {
+  try {
+    // Generate lesson using Claude
+    const lesson = await claudeClient.generateLesson(themesToAvoid, quizzesToAvoid);
+    
+    // Get an image for the lesson
+    const imageDetails = await getImageForLesson(lesson.theme);
+    const imageUrl = imageDetails?.url;
+    
+    // Format and send the lesson
+    await sendLessonToRecipient({ bot, chatId: recipientId }, lesson, imageUrl);
+    
+    // Update lesson count
+    await incrementLessonCount(recipientId);
+    
+    logger.info(`Lesson sent to user ${recipientId}`);
+  } catch (error) {
+    logger.error(`Error generating lesson: ${error instanceof Error ? error.message : String(error)}`);
+    throw error;
   }
 }

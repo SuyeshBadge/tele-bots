@@ -44,6 +44,11 @@ export const settings = {
   OPENAI_MODEL: env.OPENAI_MODEL,
   DISABLE_OPENAI: env.DISABLE_OPENAI,
   
+  // Claude configuration
+  CLAUDE_API_KEY: env.CLAUDE_API_KEY,
+  CLAUDE_MODEL: env.CLAUDE_MODEL,
+  DISABLE_CLAUDE: env.DISABLE_CLAUDE,
+  
   // Logging configuration
   LOG_LEVEL: env.LOG_LEVEL,
   LOG_FILE: env.LOG_FILE,

@@ -67,8 +67,25 @@ async function checkHealth(): Promise<void> {
       logger.error(`❌ OpenAI API key: Invalid - ${error instanceof Error ? error.message : String(error)}`);
       // Don't exit for this, as it might be optional
     }
+
+    // Step 4: Test Claude API (if being used)
+    try {
+      if (settings.CLAUDE_API_KEY) {
+        // Simple check if key exists and has proper format
+        if (settings.CLAUDE_API_KEY.startsWith('sk-ant-') && settings.CLAUDE_API_KEY.length > 20) {
+          logger.info('✅ Claude API key: Valid format');
+        } else {
+          throw new Error('Invalid Claude API key format');
+        }
+      } else {
+        logger.warn('⚠️ Claude API key: Not configured');
+      }
+    } catch (error) {
+      logger.error(`❌ Claude API key: Invalid - ${error instanceof Error ? error.message : String(error)}`);
+      // Don't exit for this, as it might be optional
+    }
     
-    // Step 4: Check Telegram token
+    // Step 5: Check Telegram token
     try {
       if (!settings.TELEGRAM_BOT_TOKEN) {
         throw new Error('Missing Telegram token');
