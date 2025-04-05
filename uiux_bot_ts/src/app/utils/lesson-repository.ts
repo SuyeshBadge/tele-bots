@@ -103,6 +103,9 @@ export class LessonRepository {
    */
   private toDbModel(appModel: LessonData): LessonDBModel {
     try {
+      // Log the input data
+      logger.debug(`Converting lesson to DB model: ${JSON.stringify(appModel, null, 2)}`);
+      
       const dbModel: LessonDBModel = {
         id: appModel.id,
         theme: appModel.theme,
@@ -121,114 +124,71 @@ export class LessonRepository {
         video_query: appModel.videoQuery
       };
       
+      // Log the output data
+      logger.debug(`Converted DB model: ${JSON.stringify(dbModel, null, 2)}`);
+      
       return dbModel;
     } catch (error) {
       logger.error(`Error converting lesson to DB model: ${error instanceof Error ? error.message : String(error)}`);
-      
-      // Fallback to a simpler model with alternative column names if needed
-      const fallbackModel: any = {
-        id: appModel.id,
-        lesson_title: appModel.title,
-        lesson_content: appModel.content,
-        vocabulary: appModel.vocabulary,
-        has_vocabulary: appModel.hasVocabulary,
-        created_at: appModel.createdAt,
-        created: appModel.createdAt,
-      };
-      
-      // Add quiz fields if they exist
-      if (appModel.quizQuestion) {
-        fallbackModel.quiz_question = appModel.quizQuestion;
-        fallbackModel.question = appModel.quizQuestion;
-      }
-      
-      if (appModel.quizOptions) {
-        fallbackModel.quiz_options = appModel.quizOptions;
-        fallbackModel.options = appModel.quizOptions;
-      }
-      
-      if (appModel.quizCorrectIndex !== undefined) {
-        fallbackModel.quiz_correct_index = appModel.quizCorrectIndex;
-        fallbackModel.correct_index = appModel.quizCorrectIndex;
-      }
-      
-      if (appModel.explanation) {
-        fallbackModel.explanation = appModel.explanation;
-      }
-      
-      if (appModel.optionExplanations) {
-        fallbackModel.option_explanations = appModel.optionExplanations;
-      }
-      
-      if (appModel.imageUrl) {
-        fallbackModel.image_url = appModel.imageUrl;
-        fallbackModel.image = appModel.imageUrl;
-      }
-      
-      if (appModel.example_link) {
-        fallbackModel.example_link = appModel.example_link;
-      }
-      
-      if (appModel.videoQuery) {
-        fallbackModel.video_query = appModel.videoQuery;
-      }
-      
-      logger.warn('Using fallback model for lesson due to conversion error');
-      return fallbackModel;
+      throw error;
     }
   }
   
   /**
-   * Save a lesson
+   * Save a lesson to the database
    * @param lesson The lesson to save
    * @returns The saved lesson
    */
   async saveLesson(lesson: LessonData): Promise<LessonData> {
     try {
       const supabase = getSupabaseClient();
-      const dbLesson = this.toDbModel(lesson);
+      const dbModel = this.toDbModel(lesson);
       
-      const { error } = await supabase
+      // Log the lesson data being saved
+      logger.info(`Saving lesson with ID ${lesson.id} to database`);
+      logger.debug(`Lesson data: ${JSON.stringify(dbModel, null, 2)}`);
+      
+      const { data, error } = await supabase
         .from('lessons')
-        .upsert(dbLesson, { onConflict: 'id' });
+        .upsert(dbModel, { onConflict: 'id' });
       
       if (error) {
         this.logSupabaseError(`saveLesson for id ${lesson.id}`, error);
-        // Continue execution but return the lesson anyway
-        return lesson;
+        throw error;
       }
       
-      logger.info(`Saved lesson with ID ${lesson.id} to Supabase`);
+      logger.info(`Successfully saved lesson with ID ${lesson.id}`);
       return lesson;
     } catch (error) {
       this.logSupabaseError(`saveLesson for id ${lesson.id}`, error);
-      // Continue execution but return the lesson anyway
-      return lesson;
+      throw error;
     }
   }
   
   /**
-   * Log Supabase errors without exiting
+   * Log Supabase errors with proper formatting
    */
   private logSupabaseError(operation: string, error: any): void {
-    let errorDetails: string;
+    const errorMessage = `Supabase error in ${operation}: ${error instanceof Error ? error.message : String(error)}`;
+    logger.error(errorMessage);
     
-    if (error instanceof Error) {
-      errorDetails = error.message;
-    } else if (error && typeof error === 'object') {
-      try {
-        // Try to extract Supabase error details
-        errorDetails = JSON.stringify(error, null, 2);
-      } catch (e) {
-        errorDetails = 'Unable to stringify error object';
-      }
-    } else {
-      errorDetails = String(error);
+    // Log additional details if available
+    if (error instanceof Error && error.stack) {
+      logger.error(`Stack trace: ${error.stack}`);
     }
     
-    const errorMessage = `ERROR: Supabase ${operation} failed: ${errorDetails}`;
-    logger.error(errorMessage);
-    console.error('\x1b[31m%s\x1b[0m', errorMessage);
+    // Log Supabase-specific error details
+    if (error && typeof error === 'object') {
+      if (error.code) {
+        logger.error(`Error code: ${error.code}`);
+      }
+      if (error.details) {
+        logger.error(`Error details: ${error.details}`);
+      }
+      if (error.hint) {
+        logger.error(`Error hint: ${error.hint}`);
+      }
+    }
   }
   
   /**

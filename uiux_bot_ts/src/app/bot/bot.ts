@@ -27,6 +27,7 @@ import { onPollAnswer } from './handlers/quiz-handlers';
 import { LessonSections } from '../api/claude-client';
 import { sendLessonToRecipient, formatLessonContent, formatVocabulary } from '../utils/lesson-utils';
 import { getImageForLesson } from '../api/image-manager';
+import { LessonData } from '../utils/lesson-types';
 
 // Configure logger
 const logger = getChildLogger('bot');
@@ -189,6 +190,24 @@ export class UIUXLessonBot {
       // Generate lesson with themes to avoid
       const lessonSections = await claudeClient.generateLesson(recentThemes, recentQuizzes);
       
+      // Convert LessonSections to LessonData once
+      const lessonData: LessonData = {
+        id: `lesson-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        title: lessonSections.title,
+        theme: lessonSections.theme,
+        content: lessonSections.contentPoints.join('\n\n'),
+        vocabulary: lessonSections.vocabulary.map(v => `${v.term}: ${v.definition}\nExample: ${v.example}`).join('\n\n'),
+        hasVocabulary: lessonSections.vocabulary.length > 0,
+        createdAt: new Date().toISOString(),
+        quizQuestion: lessonSections.quizQuestion,
+        quizOptions: lessonSections.quizOptions,
+        quizCorrectIndex: lessonSections.correctOptionIndex,
+        explanation: lessonSections.explanation,
+        optionExplanations: lessonSections.optionExplanations,
+        example_link: lessonSections.example_link,
+        videoQuery: lessonSections.videoQuery
+      };
+      
       // Get an image for the lesson
       let imageUrl = null;
       
@@ -202,15 +221,27 @@ export class UIUXLessonBot {
         logger.error(`Error getting image for scheduled lesson: ${error instanceof Error ? error.message : String(error)}`);
       }
       
+      // Save lesson to database once before sending to any subscribers
+      try {
+        const savedLesson = await lessonRepository.saveLesson(lessonData);
+        logger.info(`Successfully saved lesson with ID ${savedLesson.id} to database`);
+      } catch (error) {
+        logger.error(`Failed to save lesson to database: ${error instanceof Error ? error.message : String(error)}`);
+        throw error; // Re-throw to prevent sending unsaved lesson
+      }
+      
       // Send to all subscribers
       for (const subscriber of subscribers) {
         try {
           // Use the unified function to send the lesson content
           await sendLessonToRecipient(
             { bot: this.bot, chatId: subscriber.id },
-            lessonSections,
+            lessonData,
             imageUrl || undefined
           );
+          
+          // Track the lesson delivery
+          await lessonRepository.trackLessonDelivery(subscriber.id, lessonData.id);
           
           // Update subscriber stats
           await incrementLessonCount(subscriber.id);
@@ -439,7 +470,33 @@ async function generateAndSendLesson(recipientId: number, themesToAvoid: string[
     const imageUrl = imageDetails?.url;
     
     // Format and send the lesson
-    await sendLessonToRecipient({ bot, chatId: recipientId }, lesson, imageUrl);
+    const lessonData: LessonData = {
+      id: `lesson-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      title: lesson.title,
+      theme: lesson.theme,
+      content: lesson.contentPoints.join('\n\n'),
+      vocabulary: lesson.vocabulary.map(v => `${v.term}: ${v.definition}\nExample: ${v.example}`).join('\n\n'),
+      hasVocabulary: lesson.vocabulary.length > 0,
+      createdAt: new Date().toISOString(),
+      quizQuestion: lesson.quizQuestion,
+      quizOptions: lesson.quizOptions,
+      quizCorrectIndex: lesson.correctOptionIndex,
+      explanation: lesson.explanation,
+      optionExplanations: lesson.optionExplanations,
+      example_link: lesson.example_link,
+      videoQuery: lesson.videoQuery
+    };
+    
+    // Save lesson to database before sending
+    try {
+      const savedLesson = await lessonRepository.saveLesson(lessonData);
+      logger.info(`Successfully saved lesson with ID ${savedLesson.id} before sending to recipient ${recipientId}`);
+    } catch (error) {
+      logger.error(`Failed to save lesson to database before sending to recipient ${recipientId}: ${error instanceof Error ? error.message : String(error)}`);
+      throw error; // Re-throw to prevent sending unsaved lesson
+    }
+    
+    await sendLessonToRecipient({ bot, chatId: recipientId }, lessonData, imageUrl);
     
     // Update lesson count
     await incrementLessonCount(recipientId);
