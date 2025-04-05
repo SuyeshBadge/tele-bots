@@ -5,9 +5,12 @@ import { activeQuizzes, progressRepository } from './session';
 import { getSubscriber } from '../../utils/persistence';
 import { incrementQuizCount } from '../../utils/persistence';
 import * as claudeClient from '../../api/claude-client';
-import { formatQuiz, sendFormattedQuiz, formatQuizExplanation } from '../../utils/quiz-utils';
+import { formatQuiz, sendFormattedQuiz, formatQuizExplanation, getDetailedQuizExplanation, getRandomLearningTip } from '../../utils/quiz-utils';
 import { sanitizeHtmlForTelegram } from '../../utils/telegram-utils';
 import { getSupabaseClient } from '../../../database/supabase-client';
+
+// Import QuizData type from the types file 
+import { QuizData } from './types';
 
 const logger = getChildLogger('quiz-handlers');
 
@@ -105,24 +108,68 @@ export async function onPollAnswer(ctx: BotContext): Promise<void> {
       : `🔍 You selected: *${userChoice}*\n✅ Correct answer: *${correctAnswer}*\n\n`;
       
     try {
-      // Use the formatQuizExplanation utility to get a nicely formatted HTML explanation
-      const formattedExplanation = formatQuizExplanation({
-        question: quizData.question,
-        options: quizData.options,
+      // Ensure we have valid quiz data
+      const validatedQuizData = {
+        question: quizData.question || "UI/UX Quiz Question",
+        options: Array.isArray(quizData.options) ? quizData.options : [],
         correctIndex: quizData.correctOption,
-        explanation: quizData.explanation,
-        option_explanations: quizData.option_explanations
-      });
+        explanation: quizData.explanation || `The correct answer is "${correctAnswer}"`,
+        option_explanations: Array.isArray(quizData.option_explanations) ? quizData.option_explanations : []
+      };
       
-      // Send the nicely formatted HTML explanation
-      await ctx.api.sendMessage(userId, formattedExplanation, { 
+      // Ensure there are enough explanations (at least for the selected option and correct option)
+      while (validatedQuizData.option_explanations.length < validatedQuizData.options.length) {
+        validatedQuizData.option_explanations.push("");
+      }
+      
+      // Create a simple, focused explanation just for the selected option
+      let selectedOptionExplanation = "";
+      
+      // Get the selected option's text and add proper emoji
+      const optionText = sanitizeHtmlForTelegram(validatedQuizData.options[selectedOption] || "");
+      
+      // Get explanation for the selected option
+      let explanation = validatedQuizData.option_explanations[selectedOption] || "";
+      explanation = explanation
+        .replace(/^Correct!/i, '')
+        .replace(/^✅\s*Correct!/i, '')
+        .trim();
+      
+      // If the explanation is empty or doesn't exist, use a fallback
+      if (!explanation || explanation.trim() === '') {
+        if (isCorrect) {
+          explanation = `This is the correct approach for ${quizData.question || 'this UI/UX concept'}`;
+        } else {
+          // If incorrect and no explanation, explain why correct answer is better
+          const correctExplanation = validatedQuizData.option_explanations[validatedQuizData.correctIndex] || 
+                                    validatedQuizData.explanation || 
+                                    `The correct answer is "${correctAnswer}"`;
+          explanation = `This option is not optimal. ${correctExplanation}`;
+        }
+      }
+      
+      // Format the explanation
+      selectedOptionExplanation = `<b>📚 Answer Explanation 📚</b>\n\n`;
+      
+      if (isCorrect) {
+        selectedOptionExplanation += `✅ <b>You selected:</b> ${optionText}\n\n<b>Explanation:</b> ${explanation}\n\n`;
+      } else {
+        selectedOptionExplanation += `❌ <b>You selected:</b> ${optionText}\n\n<b>Explanation:</b> ${explanation}\n\n`;
+        selectedOptionExplanation += `✅ <b>Correct answer:</b> ${validatedQuizData.options[validatedQuizData.correctIndex]}\n\n`;
+      }
+      
+      // Add a learning tip
+      selectedOptionExplanation += getRandomLearningTip(isCorrect);
+      
+      // Send the focused explanation
+      await ctx.api.sendMessage(userId, sanitizeHtmlForTelegram(selectedOptionExplanation), { 
         parse_mode: 'HTML'
       });
       
       feedbackSent = true;
       
     } catch (feedbackError) {
-      logger.error(`Error sending formatted explanation: ${feedbackError instanceof Error ? feedbackError.message : String(feedbackError)}`);
+      logger.error(`Error sending detailed explanation: ${feedbackError instanceof Error ? feedbackError.message : String(feedbackError)}`);
       
       // If the HTML formatting failed, try with simple Markdown as fallback
       try {

@@ -298,7 +298,9 @@ export class UIUXLessonBot {
                 return;
               }
               
-              // Use the new utility function to send a consistently formatted quiz
+              // Use the utility function to send a consistently formatted quiz
+              // Note: We've updated the quiz explanation formatting to stay within Telegram's
+              // character limits for poll explanations to prevent "message is too long" errors
               await sendFormattedQuizWithBot(this.bot, subscriber.id, quizData, lessonSections.theme);
               
             } catch (quizError) {

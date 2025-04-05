@@ -18,6 +18,53 @@ interface QuizData {
   option_explanations?: string[];
 }
 
+// Arrays of learning tips specific to whether the user got the answer right or wrong
+const correctAnswerTips = [
+  "💭 Remember: Good UI/UX design always centers on user needs and expectations.",
+  "💭 Great job! Usability is the foundation of good design - intuitive interfaces lead to happy users.",
+  "💭 Excellent! Consistency in design patterns helps users build mental models about how your interface works.",
+  "💭 Well done! White space is a design element, not empty space - use it intentionally.",
+  "💭 Perfect! Color psychology can significantly impact how users perceive your interface.",
+  "💭 Correct! Accessibility isn't optional - it expands your audience and improves everyone's experience.",
+  "💭 Right! Prototype early and often - validate your ideas before committing to full development.",
+  "💭 Spot on! User feedback is gold - collect it regularly and implement improvements based on it.",
+  "💭 Great thinking! Visual hierarchy guides users through your interface in the correct order.",
+  "💭 Excellent choice! Responsive design isn't just about different devices - it's about context of use.",
+  "💭 Well done! Good microcopy can make or break the user experience.",
+  "💭 Perfect understanding! Design systems help maintain consistency and speed up your workflow.",
+  "💭 Correct approach! Data visualization should make complex information instantly understandable.",
+  "💭 Right track! The best interfaces are the ones users don't even notice they're using.",
+  "💭 Nicely done! A/B testing helps you make design decisions based on evidence, not assumptions."
+];
+
+const incorrectAnswerTips = [
+  "💭 Keep learning! Good UI/UX design always centers on user needs and expectations.",
+  "💭 Don't worry! Understanding cognitive load is key to creating interfaces users can navigate easily.",
+  "💭 Keep at it! User research should inform design decisions from the very beginning.",
+  "💭 You'll get there! Affordances help users understand how to interact with your interface.",
+  "💭 Next time! Typography isn't just about aesthetics - it affects readability and comprehension.",
+  "💭 Keep going! Error prevention is better than error handling in interface design.",
+  "💭 You're learning! Progressive disclosure helps manage complexity by revealing information gradually.",
+  "💭 Stay curious! Information architecture provides the foundation for intuitive navigation.",
+  "💭 Keep trying! Hick's Law tells us that more choices lead to longer decision times.",
+  "💭 Practice makes perfect! Gestalt principles explain how users perceive visual relationships.",
+  "💭 Keep growing! Interaction design focuses on creating engaging interfaces with well-thought-out behaviors.",
+  "💭 You'll improve! Fitts's Law reminds us that important controls should be easily clickable.",
+  "💭 Next challenge! Dark patterns might work short-term but damage user trust permanently.",
+  "💭 Keep practicing! Microinteractions add delight and improve perceived performance.",
+  "💭 You're developing! Design thinking helps solve complex problems by focusing on user needs."
+];
+
+/**
+ * Get a random learning tip based on whether the answer was correct
+ * @param isCorrect Whether the user's answer was correct
+ * @returns A random learning tip appropriate for the result
+ */
+export function getRandomLearningTip(isCorrect: boolean): string {
+  const tips = isCorrect ? correctAnswerTips : incorrectAnswerTips;
+  return `<i>${tips[Math.floor(Math.random() * tips.length)]}</i>`;
+}
+
 /**
  * Format quiz question and options with consistent emojis and formatting
  * @param quiz - Quiz data from Claude
@@ -84,12 +131,29 @@ export function formatQuiz(quiz: QuizData): {
 
 /**
  * Format quiz explanation with consistent styling and emojis
+ * Ensure it doesn't exceed Telegram's character limit for poll explanations
  * @param quizData - Quiz data from Claude
  * @returns Formatted explanation HTML string
  */
 export function formatQuizExplanation(quizData: QuizData): string {
+  // Telegram has a strict limit for poll explanations
+  const MAX_EXPLANATION_LENGTH = 120; // Be extra cautious with the limit
+  
+  // Keep poll explanation very minimal - just one line
+  let formattedExplanation = '<b>📚 Answer to see full explanation</b>';
+  
+  return sanitizeHtmlForTelegram(formattedExplanation);
+}
+
+/**
+ * Get a detailed explanation suitable for a follow-up message
+ * This can be longer and more comprehensive since it's not in the poll
+ * @param quizData - Quiz data
+ * @returns Detailed HTML explanation
+ */
+export function getDetailedQuizExplanation(quizData: QuizData): string {
   // Start with a header
-  let formattedExplanation = '<b>📚 Explanation 📚</b>\n\n';
+  let detailedExplanation = '<b>📚 Detailed Explanation 📚</b>\n\n';
   
   // Add the main explanation with emoji
   if (quizData.explanation && quizData.explanation.trim() !== '') {
@@ -98,6 +162,11 @@ export function formatQuizExplanation(quizData: QuizData): string {
       .replace(/^Correct!/i, '')
       .replace(/^✅\s*Correct!/i, '')
       .trim();
+      
+    // Don't use the poll placeholder text from formatQuizExplanation
+    if (explanation === 'Answer to see full explanation') {
+      explanation = 'This question tests your understanding of UI/UX principles.';
+    }
       
     // Add emoji based on explanation content
     let emoji = '💡';
@@ -115,38 +184,64 @@ export function formatQuizExplanation(quizData: QuizData): string {
       emoji = '⭐';
     }
     
-    formattedExplanation += `${emoji} ${explanation}\n\n`;
   } else {
     // Fallback explanation if none provided
-    formattedExplanation += '💡 This question tests your understanding of key UI/UX principles.\n\n';
+    detailedExplanation += '💡 <b>Main point:</b> This tests your understanding of key UI/UX principles.\n\n';
   }
   
   // Add option-specific explanations if available
-  if (quizData.option_explanations && quizData.option_explanations.length > 0) {
-    formattedExplanation += '<b>Option Details:</b>\n';
+  if (quizData.option_explanations && quizData.option_explanations.length > 0 &&
+      quizData.options && quizData.options.length > 0) {
     
-    quizData.options.forEach((option, index) => {
-      if (quizData.option_explanations && quizData.option_explanations[index]) {
-        let explanation = quizData.option_explanations[index]
-          .replace(/^Correct!/i, '')
-          .replace(/^✅\s*Correct!/i, '')
-          .trim();
-          
-        // Different formatting for correct vs incorrect options
-        if (index === quizData.correctIndex) {
-          formattedExplanation += `✅ <b>${option}</b>: ${explanation}\n`;
-        } else {
-          formattedExplanation += `❌ <b>${option}</b>: ${explanation}\n`;
-        }
+    detailedExplanation += '<b>🔍 Option details:</b>\n\n';
+    
+    // Make sure we're iterating through arrays of the same length
+    const optionsLength = Math.min(quizData.options.length, quizData.option_explanations.length);
+    
+    // First, let's validate that the correct option index is valid
+    const correctIndex = typeof quizData.correctIndex === 'number' && 
+                         quizData.correctIndex >= 0 && 
+                         quizData.correctIndex < optionsLength 
+                         ? quizData.correctIndex : 0;
+    
+    // Make sure the correct answer always has an explanation
+    if (!quizData.option_explanations[correctIndex] || quizData.option_explanations[correctIndex].trim() === '') {
+      quizData.option_explanations[correctIndex] = `This is the correct approach for ${quizData.question || 'this UI/UX concept'}`;
+    }
+    
+    // Show each option with its explanation
+    for (let i = 0; i < optionsLength; i++) {
+      const option = sanitizeHtmlForTelegram(quizData.options[i] || '');
+      
+      // Skip empty options
+      if (!option || option.trim() === '') continue;
+      
+      let explanation = quizData.option_explanations[i] || '';
+      explanation = explanation
+        .replace(/^Correct!/i, '')
+        .replace(/^✅\s*Correct!/i, '')
+        .trim();
+      
+      // If explanation is empty, generate a simple one
+      if (!explanation || explanation.trim() === '') {
+        explanation = i === correctIndex 
+          ? `This is the correct approach for ${quizData.question || 'this UI/UX concept'}`
+          : `This option is not optimal for ${quizData.question || 'this UI/UX concept'}`;
       }
-    });
+      
+      // Format according to correctness
+      if (i === correctIndex) {
+        detailedExplanation += `✅ <b>${option}</b>: ${explanation}\n\n`;
+      } else {
+        detailedExplanation += `❌ <b>${option}</b>: ${explanation}\n\n`;
+      }
+    }
   }
   
-  // Add a general learning tip
-  formattedExplanation += '\n<i>💭 Remember: Good UI/UX design always centers on user needs and expectations.</i>';
+  // Add a learning tip (using a correct answer tip since this is general documentation)
+  detailedExplanation += correctAnswerTips[0];
   
-  // Sanitize the whole explanation for Telegram
-  return sanitizeHtmlForTelegram(formattedExplanation);
+  return sanitizeHtmlForTelegram(detailedExplanation);
 }
 
 /**
