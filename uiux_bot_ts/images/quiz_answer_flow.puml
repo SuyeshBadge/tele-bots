@@ -1,0 +1,64 @@
+@startuml Quiz Answer Flow
+
+title UI/UX Bot Quiz Answer Flow
+
+actor User
+participant "Telegram" as Telegram
+participant "Quiz Handlers" as Handlers
+participant "Active Quizzes" as ActiveQuizzes
+participant "Progress Repository" as Progress
+participant "Supabase" as DB
+
+User -> Telegram: Answer quiz poll
+activate Telegram
+
+Telegram -> Handlers: onPollAnswer(ctx)
+activate Handlers
+
+Handlers -> Handlers: Extract userId, pollId, selectedOption
+
+Handlers -> ActiveQuizzes: get(pollId)
+ActiveQuizzes --> Handlers: quizData
+
+alt Quiz data not found
+    Handlers -> Handlers: Log warning
+    Handlers --> Telegram: No action
+else Quiz data found
+    Handlers -> DB: getSubscriber(userId)
+    DB --> Handlers: userData
+    
+    Handlers -> Handlers: isCorrect = selectedOption === quizData.correctOption
+    
+    Handlers -> Progress: saveQuizResult(userId, quizResult)
+    Progress -> DB: Store quiz result
+    
+    Handlers -> Handlers: Create feedback message
+    note right: Include header, user choice,\ncorrect answer (if wrong),\nand explanation
+    
+    alt isCorrect
+        Handlers -> Handlers: Add congratulatory header
+        Handlers -> Handlers: Add correct answer explanation
+    else isIncorrect
+        Handlers -> Handlers: Add encouraging header
+        Handlers -> Handlers: Add explanation of correct answer
+    end
+    
+    Handlers -> Handlers: Add motivational conclusion
+    
+    Handlers -> DB: incrementQuizCount(userId)
+    
+    Handlers -> Telegram: sendMessage(userId, feedbackMessage)
+    Telegram --> User: Detailed quiz feedback
+    
+    alt Complex explanation or primary message failed
+        Handlers -> Telegram: sendMessage(userId, directExplanation)
+        Telegram --> User: Additional explanation
+    end
+    
+    Handlers -> ActiveQuizzes: delete(pollId)
+end
+
+deactivate Handlers
+deactivate Telegram
+
+@enduml 

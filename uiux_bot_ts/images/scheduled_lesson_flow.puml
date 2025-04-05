@@ -1,0 +1,73 @@
+@startuml Scheduled Lesson Flow
+
+title UI/UX Bot Scheduled Lesson Flow
+
+participant "Scheduler" as Scheduler
+participant "UIUXLessonBot" as Bot
+participant "Claude API" as Claude
+participant "Lesson Repository" as LessonRepo
+participant "Image Manager" as ImageMgr
+participant "Supabase" as DB
+participant "Telegram API" as Telegram
+collections "Subscribers" as Subscribers
+
+activate Scheduler
+Scheduler -> Bot: sendScheduledLesson()
+activate Bot
+
+Bot -> DB: getAllSubscribers()
+DB --> Bot: subscribers[]
+
+alt No subscribers
+    Bot --> Scheduler: Return early
+else Has subscribers
+    Bot -> LessonRepo: getRecentThemes()
+    LessonRepo --> Bot: recentThemes[]
+    
+    Bot -> LessonRepo: getRecentQuizzes()
+    LessonRepo --> Bot: recentQuizzes[]
+    
+    Bot -> Claude: generateLesson(recentThemes, recentQuizzes)
+    activate Claude
+    Claude -> Claude: Generate unique lesson content
+    Claude --> Bot: lessonSections
+    deactivate Claude
+    
+    Bot -> Bot: Convert to LessonData
+    
+    Bot -> ImageMgr: getImageForLesson(theme)
+    activate ImageMgr
+    ImageMgr -> ImageMgr: Generate or fetch image
+    ImageMgr --> Bot: imageUrl
+    deactivate ImageMgr
+    
+    Bot -> LessonRepo: saveLesson(lessonData)
+    LessonRepo -> DB: Store lesson
+    LessonRepo --> Bot: savedLesson
+    
+    loop for each subscriber
+        Bot -> Bot: sendLessonToRecipient(bot, chatId, lessonData, imageUrl)
+        Bot -> Telegram: sendMessage(chatId, formattedContent)
+        Bot -> Telegram: sendPhoto(chatId, imageUrl)
+        
+        Bot -> LessonRepo: trackLessonDelivery(subscriberId, lessonId)
+        Bot -> DB: incrementLessonCount(subscriberId)
+        
+        Bot -> Claude: generateQuiz(theme)
+        Claude --> Bot: quizData
+        
+        Bot -> Telegram: sendPoll(chatId, quizQuestion, options)
+        Telegram --> Subscribers: Quiz poll
+        
+        Bot -> DB: saveQuiz(quizData)
+        Bot -> DB: incrementQuizCount(subscriberId)
+    end
+    
+    Bot -> DB: updateHealthStatus()
+end
+
+Bot --> Scheduler: Lesson delivery complete
+deactivate Bot
+deactivate Scheduler
+
+@enduml 

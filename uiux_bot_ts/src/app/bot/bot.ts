@@ -26,6 +26,7 @@ import { startCommand, unsubscribeCommand, helpCommand, lessonCommand } from './
 import { onPollAnswer } from './handlers/quiz-handlers';
 import { LessonSections } from '../api/claude-client';
 import { sendLessonToRecipient, formatLessonContent, formatVocabulary } from '../utils/lesson-utils';
+import { sendFormattedQuiz, sendFormattedQuizWithBot } from '../utils/quiz-utils';
 import { getImageForLesson } from '../api/image-manager';
 import { LessonData } from '../utils/lesson-types';
 
@@ -74,8 +75,8 @@ export class UIUXLessonBot {
       }
     }));
 
-    // Create scheduler instance
-    this.scheduler = new Scheduler(this.sendScheduledLesson.bind(this));
+    // Create scheduler instance with bot instance for reminders
+    this.scheduler = new Scheduler(this.sendScheduledLesson.bind(this), this.bot);
     
     // Setup error handling
     this.setupErrorHandling();
@@ -190,14 +191,54 @@ export class UIUXLessonBot {
       // Generate lesson with themes to avoid
       const lessonSections = await claudeClient.generateLesson(recentThemes, recentQuizzes);
       
-      // Convert LessonSections to LessonData once
+      // Validate lessonSections contains required data
+      if (!lessonSections || !lessonSections.contentPoints || !Array.isArray(lessonSections.contentPoints)) {
+        logger.error(`Invalid lesson sections received: ${JSON.stringify(lessonSections)}`);
+        throw new Error('Invalid lesson data received from Claude');
+      }
+      
+      // Ensure contentPoints are properly formatted with emojis
+      const contentPoints = lessonSections.contentPoints.map(point => {
+        if (!point || typeof point !== 'string') return "🔹 Key UI/UX concept";
+        if (!point.match(/^\p{Emoji}/u)) return `🔹 ${point}`;
+        return point;
+      });
+      
+      // Import formatting functions from lesson-utils
+      const utils = await import('../utils/lesson-utils');
+      
+      // Use the same formatting functions used in manual lessons
+      const formattedContent = utils.formatLessonContent({
+        ...lessonSections,
+        contentPoints
+      });
+      
+      // Ensure vocabulary has required fields
+      const vocabulary = (lessonSections.vocabulary || []).map(item => {
+        if (!item || typeof item !== 'object') {
+          return {
+            term: "UI/UX Term",
+            definition: "A key concept in user interface design",
+            example: "Using this term in a real design scenario"
+          };
+        }
+        return {
+          term: item.term || "UI/UX Term",
+          definition: item.definition || "A key concept in user interface design",
+          example: item.example || "Using this term in a real design scenario"
+        };
+      });
+      
+      const formattedVocabulary = utils.formatVocabulary(vocabulary);
+      
+      // Convert LessonSections to LessonData once using proper formatting
       const lessonData: LessonData = {
         id: `lesson-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
         title: lessonSections.title,
         theme: lessonSections.theme,
-        content: lessonSections.contentPoints.join('\n\n'),
-        vocabulary: lessonSections.vocabulary.map(v => `${v.term}: ${v.definition}\nExample: ${v.example}`).join('\n\n'),
-        hasVocabulary: lessonSections.vocabulary.length > 0,
+        content: formattedContent,
+        vocabulary: formattedVocabulary,
+        hasVocabulary: vocabulary.length > 0,
         createdAt: new Date().toISOString(),
         quizQuestion: lessonSections.quizQuestion,
         quizOptions: lessonSections.quizOptions,
@@ -257,36 +298,9 @@ export class UIUXLessonBot {
                 return;
               }
               
-              const quiz = await this.bot.api.sendPoll(
-                subscriber.id,
-                quizData.question,
-                quizData.options.map(option => ({ text: option })),
-                { 
-                  is_anonymous: false,
-                  type: 'quiz',
-                  correct_option_id: quizData.correctIndex,
-                  explanation: quizData.explanation || "Explanation will be provided after you answer.",
-                  explanation_parse_mode: 'HTML'
-                }
-              );
+              // Use the new utility function to send a consistently formatted quiz
+              await sendFormattedQuizWithBot(this.bot, subscriber.id, quizData, lessonSections.theme);
               
-              // Save the quiz to the database for later reference
-              await quizRepository.saveQuiz({
-                pollId: quiz.poll.id,
-                lessonId: lessonSections.theme,
-                quizId: `quiz-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-                correctOption: quizData.correctIndex,
-                question: quizData.question,
-                options: quizData.options,
-                explanation: quizData.explanation || "",
-                option_explanations: quizData.option_explanations || [],
-                theme: lessonSections.theme,
-                createdAt: new Date().toISOString(),
-                expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
-              });
-              
-              // Update quiz count
-              await incrementQuizCount(subscriber.id);
             } catch (quizError) {
               logger.error(`Error sending quiz to subscriber ${subscriber.id}: ${quizError instanceof Error ? quizError.message : String(quizError)}`);
               
@@ -463,28 +477,68 @@ export async function startBot(): Promise<void> {
 async function generateAndSendLesson(recipientId: number, themesToAvoid: string[] = [], quizzesToAvoid: string[] = []): Promise<void> {
   try {
     // Generate lesson using Claude
-    const lesson = await claudeClient.generateLesson(themesToAvoid, quizzesToAvoid);
+    const lessonResponse = await claudeClient.generateLesson(themesToAvoid, quizzesToAvoid);
+    
+    // Validate lessonSections contains required data
+    if (!lessonResponse || !lessonResponse.contentPoints || !Array.isArray(lessonResponse.contentPoints)) {
+      logger.error(`Invalid lesson sections received: ${JSON.stringify(lessonResponse)}`);
+      throw new Error('Invalid lesson data received from Claude');
+    }
+    
+    // Ensure contentPoints are properly formatted with emojis
+    const contentPoints = lessonResponse.contentPoints.map(point => {
+      if (!point || typeof point !== 'string') return "🔹 Key UI/UX concept";
+      if (!point.match(/^\p{Emoji}/u)) return `🔹 ${point}`;
+      return point;
+    });
     
     // Get an image for the lesson
-    const imageDetails = await getImageForLesson(lesson.theme);
+    const imageDetails = await getImageForLesson(lessonResponse.theme);
     const imageUrl = imageDetails?.url;
+    
+    // Import formatting functions from lesson-utils
+    const utils = await import('../utils/lesson-utils');
+    
+    // Use the same formatting functions used for formatting
+    const formattedContent = utils.formatLessonContent({
+      ...lessonResponse,
+      contentPoints
+    });
+    
+    // Ensure vocabulary has required fields
+    const vocabulary = (lessonResponse.vocabulary || []).map(item => {
+      if (!item || typeof item !== 'object') {
+        return {
+          term: "UI/UX Term",
+          definition: "A key concept in user interface design",
+          example: "Using this term in a real design scenario"
+        };
+      }
+      return {
+        term: item.term || "UI/UX Term",
+        definition: item.definition || "A key concept in user interface design",
+        example: item.example || "Using this term in a real design scenario"
+      };
+    });
+    
+    const formattedVocabulary = utils.formatVocabulary(vocabulary);
     
     // Format and send the lesson
     const lessonData: LessonData = {
       id: `lesson-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      title: lesson.title,
-      theme: lesson.theme,
-      content: lesson.contentPoints.join('\n\n'),
-      vocabulary: lesson.vocabulary.map(v => `${v.term}: ${v.definition}\nExample: ${v.example}`).join('\n\n'),
-      hasVocabulary: lesson.vocabulary.length > 0,
+      title: lessonResponse.title,
+      theme: lessonResponse.theme,
+      content: formattedContent,
+      vocabulary: formattedVocabulary,
+      hasVocabulary: vocabulary.length > 0,
       createdAt: new Date().toISOString(),
-      quizQuestion: lesson.quizQuestion,
-      quizOptions: lesson.quizOptions,
-      quizCorrectIndex: lesson.correctOptionIndex,
-      explanation: lesson.explanation,
-      optionExplanations: lesson.optionExplanations,
-      example_link: lesson.example_link,
-      videoQuery: lesson.videoQuery
+      quizQuestion: lessonResponse.quizQuestion,
+      quizOptions: lessonResponse.quizOptions,
+      quizCorrectIndex: lessonResponse.correctOptionIndex,
+      explanation: lessonResponse.explanation,
+      optionExplanations: lessonResponse.optionExplanations,
+      example_link: lessonResponse.example_link,
+      videoQuery: lessonResponse.videoQuery
     };
     
     // Save lesson to database before sending

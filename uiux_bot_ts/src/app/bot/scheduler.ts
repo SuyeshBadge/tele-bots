@@ -7,6 +7,9 @@ import schedule from 'node-schedule';
 import { getChildLogger } from '../utils/logger';
 import { settings, IS_DEV_MODE, DISABLE_DEV_SCHEDULED_LESSONS } from '../config/settings';
 import { quizRepository } from '../utils/quiz-repository';
+import { sendQuizReminder } from '../utils/quiz-utils';
+import { Bot } from 'grammy';
+import { BotContext } from './handlers/types';
 
 // Configure logger
 const logger = getChildLogger('scheduler');
@@ -18,14 +21,18 @@ export class Scheduler {
   private jobs: schedule.Job[] = [];
   private lessonCallback: () => Promise<void>;
   private cleanupJob: schedule.Job | null = null;
+  private reminderJob: schedule.Job | null = null;
+  private botInstance: Bot<BotContext> | null = null;
 
   /**
    * Initialize the scheduler
    * 
    * @param lessonCallback - Callback function to execute when a lesson is scheduled
+   * @param botInstance - Bot instance to use for sending reminders
    */
-  constructor(lessonCallback: () => Promise<void>) {
+  constructor(lessonCallback: () => Promise<void>, botInstance?: Bot<BotContext>) {
     this.lessonCallback = lessonCallback;
+    this.botInstance = botInstance || null;
   }
 
   /**
@@ -61,6 +68,16 @@ export class Scheduler {
       await cleanupExpiredQuizzes();
     });
     
+    // Schedule reminders for unanswered quizzes (run every 3 hours)
+    if (this.botInstance) {
+      this.reminderJob = schedule.scheduleJob('30 */3 * * *', async () => {
+        await this.sendQuizReminders();
+      });
+      logger.info('Quiz reminder job scheduled');
+    } else {
+      logger.warn('Bot instance not provided, quiz reminders will not be sent');
+    }
+    
     const nextRun = this.getNextScheduledTime();
     logger.info(`Scheduler started. Next lesson: ${nextRun?.toISOString() || 'Unknown'}`);
     
@@ -81,35 +98,101 @@ export class Scheduler {
    * Stop the scheduler
    */
   public stop(): void {
-    this.jobs.forEach(job => job.cancel());
+    logger.info('Stopping scheduler');
+    
+    // Cancel all scheduled jobs
+    for (const job of this.jobs) {
+      job.cancel();
+    }
     this.jobs = [];
     
+    // Cancel cleanup job
     if (this.cleanupJob) {
       this.cleanupJob.cancel();
       this.cleanupJob = null;
     }
+    
+    // Cancel reminder job
+    if (this.reminderJob) {
+      this.reminderJob.cancel();
+      this.reminderJob = null;
+    }
+    
+    logger.info('Scheduler stopped');
   }
 
   /**
-   * Get the next scheduled lesson time
-   * 
-   * @returns The next scheduled lesson time
+   * Get the next scheduled time for a lesson
    */
   public getNextScheduledTime(): Date | null {
-    if (this.jobs.length === 0 || (IS_DEV_MODE && DISABLE_DEV_SCHEDULED_LESSONS)) {
+    if (this.jobs.length === 0) {
       return null;
     }
     
-    // Find the earliest next invocation time
-    let nextDate: Date | null = null;
-    for (const job of this.jobs) {
-      const jobNext = job.nextInvocation();
-      if (!nextDate || jobNext < nextDate) {
-        nextDate = jobNext;
-      }
+    return this.jobs[0].nextInvocation();
+  }
+  
+  /**
+   * Set the bot instance to use for sending reminders
+   * @param bot The bot instance
+   */
+  public setBotInstance(bot: Bot<BotContext>): void {
+    this.botInstance = bot;
+  }
+  
+  /**
+   * Send reminders for unanswered quizzes
+   */
+  private async sendQuizReminders(): Promise<void> {
+    if (!this.botInstance) {
+      logger.warn('Cannot send quiz reminders: Bot instance not available');
+      return;
     }
     
-    return nextDate;
+    try {
+      logger.info('Checking for unanswered quizzes to send reminders');
+      
+      // Get unanswered quizzes that were sent more than 45 minutes ago
+      const unansweredQuizzes = await quizRepository.getUnansweredQuizzes(45, 24);
+      
+      if (unansweredQuizzes.length === 0) {
+        logger.info('No unanswered quizzes found that need reminders');
+        return;
+      }
+      
+      logger.info(`Found ${unansweredQuizzes.length} unanswered quizzes to remind users about`);
+      
+      // Group by user ID to avoid sending multiple reminders to the same user
+      const quizzesByUser = new Map<number, typeof unansweredQuizzes[0][]>();
+      
+      for (const quiz of unansweredQuizzes) {
+        if (!quizzesByUser.has(quiz.userId)) {
+          quizzesByUser.set(quiz.userId, []);
+        }
+        quizzesByUser.get(quiz.userId)?.push(quiz);
+      }
+      
+      // Send at most one reminder per user, for their most recent unanswered quiz
+      let remindersSent = 0;
+      for (const [userId, quizzes] of quizzesByUser.entries()) {
+        // Sort by createdAt descending to get most recent first
+        quizzes.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        
+        const mostRecentQuiz = quizzes[0];
+        const success = await sendQuizReminder(this.botInstance, userId, mostRecentQuiz);
+        
+        if (success) {
+          remindersSent++;
+        }
+        
+        // Add a small delay between messages to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      logger.info(`Successfully sent ${remindersSent} quiz reminders`);
+    } catch (error) {
+      logger.error(`Error sending quiz reminders: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 }
 

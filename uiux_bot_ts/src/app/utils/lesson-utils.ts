@@ -3,8 +3,8 @@ import { getChildLogger } from './logger';
 import { getSubscriber, incrementLessonCount, getSentVideoIds, recordSentVideo } from './persistence';
 import { lessonRepository } from './lesson-repository';
 import { LessonData } from './lesson-types';
-import * as openaiClient from '../api/openai-client';
-import { LessonSections } from '../api/openai-client';
+import claudeClient from '../api/claude-client';
+import { LessonSections } from '../api/claude-client';
 import * as imageManager from '../api/image-manager';
 import * as youtubeClient from '../api/youtube-client';
 import { sendQuiz } from '../bot/handlers/quiz-handlers';
@@ -72,7 +72,7 @@ export async function sendLesson(ctx: BotContext, userId: number): Promise<void>
 }
 
 /**
- * Generate a new lesson using OpenAI
+ * Generate a new lesson using Claude
  */
 async function generateNewLesson(): Promise<LessonData | null> {
   try {
@@ -82,8 +82,8 @@ async function generateNewLesson(): Promise<LessonData | null> {
     const recentThemes = await lessonRepository.getRecentThemes();
     const recentQuizzes = await lessonRepository.getRecentQuizzes();
     
-    // Generate lesson using OpenAI with recent themes to avoid
-    const lessonSections = await openaiClient.generateLesson(recentThemes, recentQuizzes);
+    // Generate lesson using Claude with recent themes to avoid
+    const lessonSections = await claudeClient.generateLesson(recentThemes, recentQuizzes);
     if (!lessonSections) {
       throw new Error('Failed to generate lesson sections');
     }
@@ -130,13 +130,28 @@ async function generateNewLesson(): Promise<LessonData | null> {
 /**
  * Format lesson content from lesson sections
  */
-export function formatLessonContent(sections: LessonSections): string {
+export function formatLessonContent(sections: LessonSections | {contentPoints: string[], example_link?: {url: string, description: string}}): string {
   try {
     let content = '';
     
     // Add content points
     if (Array.isArray(sections.contentPoints) && sections.contentPoints.length > 0) {
-      content = sections.contentPoints.join('\n\n');
+      // Ensure each content point has proper spacing and preserves emojis
+      content = sections.contentPoints
+        .filter(point => point && point.trim() !== '')
+        .map(point => {
+          // Make sure each point has an emoji at the beginning
+          if (!point.match(/^\p{Emoji}/u)) {
+            return `🔹 ${point}`;
+          }
+          return point;
+        })
+        .join('\n\n');
+    } else {
+      // Fallback content if no content points are available
+      content = "🔹 UI/UX design focuses on creating interfaces that are both visually appealing and functional.\n\n" +
+                "🔸 User research and testing are essential for creating effective designs.\n\n" +
+                "📱 Responsive design ensures a good experience across different devices.";
     }
     
     // Add example link if available
@@ -147,7 +162,10 @@ export function formatLessonContent(sections: LessonSections): string {
     return content;
   } catch (error) {
     logger.error(`Error formatting lesson content: ${error instanceof Error ? error.message : String(error)}`);
-    return '';
+    // Return fallback content in case of error
+    return "🔹 UI/UX design focuses on creating interfaces that are both visually appealing and functional.\n\n" +
+           "🔸 User research and testing are essential for creating effective designs.\n\n" +
+           "📱 Responsive design ensures a good experience across different devices.";
   }
 }
 
@@ -157,16 +175,35 @@ export function formatLessonContent(sections: LessonSections): string {
 export function formatVocabulary(vocabularyTerms: Array<{ term: string; definition: string; example: string }>): string {
   try {
     if (!vocabularyTerms || vocabularyTerms.length === 0) {
+      // Return empty string if no vocabulary terms
       return '';
     }
     
+    // Format vocabulary terms with proper HTML for Telegram
     return '<b>📚 Key Vocabulary</b>\n\n' + 
       vocabularyTerms
-        .map(item => `<b>${item.term}</b>: ${item.definition}\n<i>Example:</i> ${item.example}`)
+        .filter(item => item && item.term && item.definition)
+        .map(item => {
+          // Ensure proper formatting with bold terms and italicized examples
+          const term = item.term.trim();
+          const definition = item.definition.trim();
+          const example = item.example ? item.example.trim() : '';
+          
+          let formatted = `<b>${term}</b>: ${definition}`;
+          if (example) {
+            formatted += `\n<i>Example:</i> ${example}`;
+          }
+          
+          return formatted;
+        })
         .join('\n\n');
   } catch (error) {
     logger.error(`Error formatting vocabulary: ${error instanceof Error ? error.message : String(error)}`);
-    return '';
+    
+    // Return fallback content in case of error
+    return '<b>📚 Key Vocabulary</b>\n\n' +
+           '<b>User Experience (UX)</b>: The overall experience of a person using a product or service.\n<i>Example:</i> How easily a user can complete a task on a website.\n\n' +
+           '<b>User Interface (UI)</b>: The visual elements users interact with in a product.\n<i>Example:</i> Buttons, menus, and layout of a mobile app.';
   }
 }
 
@@ -229,8 +266,19 @@ async function sendLessonToRecipient(
       throw new Error('Could not determine chat ID for sending lesson');
     }
     
-    // Send title and main content together
-    const formattedContent = `📚 <b>${lesson.title}</b>\n\n${lesson.content}`;
+    // Ensure lesson has required fields
+    const safeLesson = {
+      title: lesson.title || "UI/UX Design Principles",
+      content: lesson.content || "🔹 UI/UX design focuses on creating intuitive interfaces.",
+      hasVocabulary: lesson.hasVocabulary && lesson.vocabulary ? true : false,
+      vocabulary: lesson.vocabulary || "",
+      videoQuery: Array.isArray(lesson.videoQuery) ? lesson.videoQuery : [],
+      theme: lesson.theme || "UI/UX Design",
+      example_link: lesson.example_link
+    };
+    
+    // Send title and main content together - sanitize for Telegram
+    const formattedContent = sanitizeHtmlForTelegram(`📚 <b>${safeLesson.title}</b>\n\n${safeLesson.content}`);
     
     if (imageUrl) {
       // Send with image if available
@@ -246,22 +294,35 @@ async function sendLessonToRecipient(
     }
     
     // Send vocabulary if exists
-    if (lesson.hasVocabulary) {
-      await bot.sendMessage(chatId, lesson.vocabulary, {
+    if (safeLesson.hasVocabulary && safeLesson.vocabulary) {
+      await bot.sendMessage(chatId, sanitizeHtmlForTelegram(safeLesson.vocabulary), {
         parse_mode: 'HTML'
       });
     }
     
+    // Send example link if available in a separate message for better visibility
+    if (safeLesson.example_link && safeLesson.example_link.url) {
+      const exampleMessage = `<b>🔍 Real-World Example:</b>\n<a href="${safeLesson.example_link.url}">${safeLesson.example_link.url}</a>\n${safeLesson.example_link.description || ""}`;
+      await bot.sendMessage(chatId, sanitizeHtmlForTelegram(exampleMessage), {
+        parse_mode: 'HTML',
+        disable_web_page_preview: false
+      });
+    }
+    
     // Get and send related video if available
-    if (lesson.videoQuery) {
-      for (const query of lesson.videoQuery) {
+    if (safeLesson.videoQuery && safeLesson.videoQuery.length > 0) {
+      for (const query of safeLesson.videoQuery) {
         try {
           const video = await youtubeClient.searchTutorialVideo(query);
           if (video) {
-            await bot.sendMessage(chatId, 
-              `🎥 Related Tutorial Video\n\n<b>${video.title}</b>\n\nWatch this helpful video to learn more about ${lesson.theme}:\n<i>Duration: ${video.duration}</i>\n\n${video.url}`,
-              { parse_mode: 'HTML' }
+            const videoMessage = sanitizeHtmlForTelegram(
+              `🎥 <b>Related Tutorial Video</b>\n\n<b>${video.title}</b>\n\nWatch this helpful video to learn more about ${safeLesson.theme}:\n<i>Duration: ${video.duration}</i>\n\n${video.url}`
             );
+            
+            await bot.sendMessage(chatId, videoMessage, { 
+              parse_mode: 'HTML',
+              disable_web_page_preview: false
+            });
           }
         } catch (error) {
           logger.error(`Error sending video for query ${query}: ${error instanceof Error ? error.message : String(error)}`);

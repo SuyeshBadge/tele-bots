@@ -1,0 +1,80 @@
+@startuml Manual Lesson Request Flow
+
+title UI/UX Bot Manual Lesson Request Flow
+
+actor User
+participant "Telegram" as Telegram
+participant "Bot Handlers" as Handlers
+participant "Lesson Utils" as LessonUtils
+participant "Claude API" as Claude
+participant "Lesson Repository" as LessonRepo
+participant "Image Manager" as ImageMgr
+participant "Supabase" as DB
+
+User -> Telegram: /lesson command
+activate Telegram
+
+Telegram -> Handlers: lessonCommand(ctx)
+activate Handlers
+
+Handlers -> DB: getSubscriber(userId)
+DB --> Handlers: subscriber
+
+alt Not subscribed
+    Handlers -> Telegram: "Please use /start first"
+    Telegram --> User: Subscription required message
+else Is subscribed
+    Handlers -> DB: updateSubscriber(lastActivity)
+    Handlers -> Telegram: "Generating lesson..."
+    Telegram --> User: Wait message
+    
+    Handlers -> LessonUtils: sendLesson(ctx, userId)
+    activate LessonUtils
+    
+    LessonUtils -> LessonRepo: getRecentThemes(userId)
+    LessonRepo --> LessonUtils: recentThemes[]
+    
+    LessonUtils -> LessonRepo: getRecentQuizzes(userId) 
+    LessonRepo --> LessonUtils: recentQuizzes[]
+    
+    LessonUtils -> Claude: generateLesson(recentThemes, recentQuizzes)
+    activate Claude
+    Claude -> Claude: Create unique lesson
+    Claude --> LessonUtils: lessonSections
+    deactivate Claude
+    
+    LessonUtils -> LessonUtils: Convert to LessonData
+    
+    LessonUtils -> ImageMgr: getImageForLesson(theme)
+    activate ImageMgr
+    ImageMgr -> ImageMgr: Generate or fetch image
+    ImageMgr --> LessonUtils: imageUrl
+    deactivate ImageMgr
+    
+    LessonUtils -> LessonRepo: saveLesson(lessonData)
+    LessonRepo -> DB: Store lesson
+    LessonRepo --> LessonUtils: savedLesson
+    
+    LessonUtils -> LessonUtils: formatLessonContent(lessonData)
+    LessonUtils -> Telegram: sendMessage(chatId, formattedContent)
+    LessonUtils -> Telegram: sendPhoto(chatId, imageUrl)
+    
+    LessonUtils -> DB: incrementLessonCount(userId)
+    LessonUtils -> LessonRepo: trackLessonDelivery(userId, lessonId)
+    
+    LessonUtils -> Claude: generateQuiz(theme)
+    Claude --> LessonUtils: quizData
+    
+    LessonUtils -> Telegram: sendPoll(userId, quizQuestion, options)
+    Telegram --> User: Quiz poll
+    
+    LessonUtils -> DB: saveQuiz(quizData)
+    LessonUtils -> DB: incrementQuizCount(userId)
+    
+    deactivate LessonUtils
+end
+
+deactivate Handlers
+deactivate Telegram
+
+@enduml 

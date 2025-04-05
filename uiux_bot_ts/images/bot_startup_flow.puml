@@ -1,0 +1,49 @@
+@startuml Bot Startup Flow
+
+title UI/UX Bot Startup Flow
+
+actor User
+participant "main.ts" as Main
+participant "UIUXLessonBot" as Bot
+participant "Scheduler" as Scheduler
+participant "Supabase" as DB
+participant "Health Server" as Health
+
+User -> Main: Start bot
+activate Main
+
+Main -> Main: Parse command\nline arguments
+Main -> Main: Process --dev flag
+
+alt isDev mode
+    Main -> Main: Start hot reload
+else Production mode
+    Main -> Main: setupGlobalErrorHandlers()
+    Main -> DB: initSupabaseSchema()
+    Main -> DB: ensureDataInSupabase()
+    Main -> DB: initPersistence()
+    
+    create Bot
+    Main -> Bot: new UIUXLessonBot()
+    activate Bot
+    
+    Bot -> Bot: constructor()
+    Bot -> Bot: setupErrorHandling()
+    Bot -> Bot: setupCommandHandlers()
+    
+    Main -> Health: startHealthServer(bot)
+    activate Health
+    
+    Main -> Bot: start()
+    Bot -> Scheduler: start()
+    activate Scheduler
+    Scheduler -> Scheduler: Schedule lessons\nat set intervals
+    
+    Main -> Main: setupSignalHandlers(bot)
+    Health -> Health: setHealthy(true)
+    
+    Health --> Main: Health check OK
+    Main --> User: Bot is running
+end
+
+@enduml 

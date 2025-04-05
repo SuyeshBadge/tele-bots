@@ -1,0 +1,85 @@
+@startuml Lesson Generation Flow
+
+title UI/UX Bot Lesson Generation Flow
+
+participant "Client" as Client
+participant "Claude Client" as ClaudeClient
+participant "Lesson Cache" as Cache
+participant "Anthropic API" as Anthropic
+participant "Lesson Repository" as LessonRepo
+
+Client -> ClaudeClient: generateLesson(themesToAvoid, quizzesToAvoid)
+activate ClaudeClient
+
+ClaudeClient -> ClaudeClient: Initialize function
+
+ClaudeClient -> ClaudeClient: generateLessonContent(themesToAvoid, quizzesToAvoid)
+activate ClaudeClient #DarkSalmon
+
+' Retry loop
+ClaudeClient -> ClaudeClient: Initialize retry counter
+
+group Retry loop (max 2 attempts)
+    ' Create prompt
+    ClaudeClient -> ClaudeClient: Create system message
+    ClaudeClient -> ClaudeClient: Format prompt with exclusion lists
+    
+    ' Check cache first
+    ClaudeClient -> Cache: Check for cached lesson
+    
+    alt Lesson in cache and not expired
+        Cache --> ClaudeClient: Return cached lessonData
+    else Need to generate new lesson
+        ClaudeClient -> Anthropic: messages.create(system, prompt)
+        activate Anthropic
+        Anthropic -> Anthropic: Generate content
+        Anthropic --> ClaudeClient: API response
+        deactivate Anthropic
+        
+        ClaudeClient -> ClaudeClient: Extract content
+        ClaudeClient -> ClaudeClient: Log token usage
+        
+        ClaudeClient -> ClaudeClient: Clean content (remove markdown formatting)
+        
+        ClaudeClient -> ClaudeClient: Parse JSON
+        
+        alt Parse successful
+            ClaudeClient -> ClaudeClient: Validate required fields
+            ClaudeClient -> ClaudeClient: Validate quiz options
+            ClaudeClient -> ClaudeClient: Validate correct option index
+            ClaudeClient -> ClaudeClient: Validate vocabulary terms
+            
+            ClaudeClient -> Cache: Store in cache
+            
+            ClaudeClient --> ClaudeClient: Return lessonData
+        else Parse failed
+            ClaudeClient -> ClaudeClient: Try to fix and parse JSON
+            
+            alt Fix successful
+                ClaudeClient -> ClaudeClient: Validate fields
+                ClaudeClient -> Cache: Store in cache
+                ClaudeClient --> ClaudeClient: Return lessonData
+            else Fix failed
+                ClaudeClient -> ClaudeClient: Retry or use backup approach
+                
+                alt retryCount < maxRetries
+                    ClaudeClient -> ClaudeClient: Increment retry counter
+                    ClaudeClient -> ClaudeClient: Continue retry loop
+                else Max retries reached
+                    ClaudeClient -> ClaudeClient: Use fallback template
+                    ClaudeClient --> ClaudeClient: Return fallback lessonData
+                end
+            end
+        end
+    end
+end
+
+ClaudeClient --> ClaudeClient: Format as LessonSections
+deactivate ClaudeClient #DarkSalmon
+
+ClaudeClient -> LessonRepo: Log generation
+ClaudeClient --> Client: Return LessonSections
+
+deactivate ClaudeClient
+
+@enduml 

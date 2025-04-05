@@ -5,6 +5,9 @@ import { activeQuizzes, progressRepository } from './session';
 import { getSubscriber } from '../../utils/persistence';
 import { incrementQuizCount } from '../../utils/persistence';
 import * as claudeClient from '../../api/claude-client';
+import { formatQuiz, sendFormattedQuiz, formatQuizExplanation } from '../../utils/quiz-utils';
+import { sanitizeHtmlForTelegram } from '../../utils/telegram-utils';
+import { getSupabaseClient } from '../../../database/supabase-client';
 
 const logger = getChildLogger('quiz-handlers');
 
@@ -13,58 +16,55 @@ const logger = getChildLogger('quiz-handlers');
  */
 export async function onPollAnswer(ctx: BotContext): Promise<void> {
   try {
-    // Add null checks for poll_answer
-    if (!ctx.update.poll_answer) {
-      logger.warn('Received poll_answer event with undefined poll_answer data');
-      return;
-    }
-
-    // Get user data and poll information
-    const userId = ctx.update.poll_answer.user?.id;
-    const pollId = ctx.update.poll_answer.poll_id;
-    const selectedOption = ctx.update.poll_answer.option_ids?.[0];
-    
-    // Validate essential data
-    if (!userId || !pollId || selectedOption === undefined) {
-      logger.warn(`Missing essential poll answer data: userId=${userId}, pollId=${pollId}, selectedOption=${selectedOption}`);
+    const pollAnswer = ctx.update.poll_answer;
+    if (!pollAnswer) {
       return;
     }
     
-    // Check if we have the quiz data
+    const pollId = pollAnswer.poll_id;
+    
+    // Check if user exists
+    if (!pollAnswer.user) {
+      logger.warn(`Poll answer with no user data for poll ${pollId}`);
+      return;
+    }
+    
+    const userId = pollAnswer.user.id;
+    
+    // Get quiz data from active quizzes storage
     const quizData = await activeQuizzes.get(pollId);
-
     if (!quizData) {
-      logger.warn(`No quiz data found for poll ${pollId} answer from user ${userId}`);
+      logger.warn(`No quiz data found for poll ${pollId}`);
       return;
     }
-
-    // Get user data
-    const userData = await getSubscriber(userId);
-
-    if (!userData) {
-      logger.warn(`Received poll answer with missing user data for user ${userId}, poll ${pollId}`);
+    
+    // Get the selected option
+    if (pollAnswer.option_ids.length === 0) {
+      logger.info(`User ${userId} did not select any option for poll ${pollId}`);
       return;
     }
-
-    // Determine if the answer is correct
+    
+    const selectedOption = pollAnswer.option_ids[0];
+    
+    // Check if the answer is correct
     const isCorrect = selectedOption === quizData.correctOption;
-
-    // Save the quiz result
-    await progressRepository.saveQuizResult(userId, {
+    
+    // Mark quiz as answered in the database
+    await markQuizAsAnswered(userId, pollId, isCorrect);
+    
+    // Log quiz response activity
+    logActivity('quiz_answered', userId, `User answered quiz ${isCorrect ? 'correctly' : 'incorrectly'}`, {
       isCorrect,
-      lessonId: quizData.lessonId,
-      quizId: quizData.quizId,
-      timestamp: new Date().toISOString()
+      selectedOption,
+      correctOption: quizData.correctOption,
+      pollId,
+      theme: quizData.theme,
+      questionLength: quizData.question.length
     });
-
+    
     // Get the text for the options
     const userChoice = quizData.options[selectedOption];
     const correctAnswer = quizData.options[quizData.correctOption];
-
-    // Extract explanation
-    const explanation = quizData.explanation || 
-      (quizData.option_explanations && quizData.option_explanations[quizData.correctOption]) || 
-      ""; 
 
     // Create feedback message
     let feedbackHeader: string;
@@ -103,157 +103,44 @@ export async function onPollAnswer(ctx: BotContext): Promise<void> {
     feedbackMessage += isCorrect
       ? `✅ You selected: *${userChoice}*\n\n`
       : `🔍 You selected: *${userChoice}*\n✅ Correct answer: *${correctAnswer}*\n\n`;
-    
-    // Use appropriate option explanation instead of trying to format all explanations
-    if (isCorrect && quizData.option_explanations && quizData.option_explanations[quizData.correctOption]) {
-      // For correct answers, use the explanation for the CORRECT option (not selectedOption)
-      feedbackMessage += `${quizData.option_explanations[quizData.correctOption]}\n\n`;
       
-      logActivity('explanation_included', userId, 'Correct option explanation included in quiz feedback', {
-        explanationLength: quizData.option_explanations[quizData.correctOption].length
-      });
-    } else if (!isCorrect) {
-      // For incorrect answers, show explanation for the correct option only
-      if (quizData.option_explanations && quizData.option_explanations[quizData.correctOption]) {
-        // Get the correct option explanation
-        let correctExplanation = quizData.option_explanations[quizData.correctOption];
-        
-        // If the user's answer is incorrect, we need to modify any "Correct!" prefixes
-        // to avoid confusing the user
-        if (!isCorrect) {
-          // Replace "Correct!" with "The correct answer is:" to avoid confusion
-          correctExplanation = correctExplanation
-            .replace(/^Correct!/i, "The correct answer is:")
-            .replace(/^✅\s*Correct!/i, "The correct answer is:");
-        }
-        
-        feedbackMessage += `${correctExplanation}\n\n`;
-        
-        logActivity('explanation_included', userId, 'Correct option explanation included for incorrect answer', {
-          explanationLength: quizData.option_explanations[quizData.correctOption].length
-        });
-      }
-    } else if (explanation && explanation.trim()) {
-      // Fallback to general explanation if no option-specific explanation is available
-      feedbackMessage += `${explanation}\n\n`;
-      
-      logActivity('explanation_included', userId, 'General explanation included in quiz feedback', {
-        explanationLength: explanation.length
-      });
-    } else {
-      // Last resort fallback explanation
-      const fallbackExplanation = isCorrect 
-        ? `The answer "${correctAnswer}" is correct for this question about ${quizData.theme || 'UI/UX design'}.` 
-        : `The correct answer is "${correctAnswer}" for this question about ${quizData.theme || 'UI/UX design'}.`;
-      
-      feedbackMessage += `${fallbackExplanation}\n\n`;
-      
-      logActivity('fallback_explanation_used', userId, 'Used fallback explanation due to missing explanation data', {
-        isCorrect,
-        questionTheme: quizData.theme
-      });
-    }
-
-    // Add more personalized and motivating conclusion
-    if (isCorrect) {
-      // More varied and encouraging correct answer messages
-      const correctConclusions = [
-        "💪 You're building impressive UI/UX skills with each question you answer!",
-        "🚀 Keep this momentum going - you're mastering UI/UX concepts beautifully!",
-        "🎯 This shows your growing expertise in design principles. Excellent work!",
-        "⚡ Your design knowledge is really shining through. Keep it up!",
-        "🧠 Your understanding of UI/UX concepts is impressive and growing stronger!"
-      ];
-      feedbackMessage += correctConclusions[Math.floor(Math.random() * correctConclusions.length)];
-    } else {
-      // More varied and supportive incorrect answer messages
-      const incorrectConclusions = [
-        "🌱 Every question is a stepping stone to mastery - you're on a great path!",
-        "💡 The best designers learn from every experience - you're doing exactly that!",
-        "🧩 Each challenge builds your design thinking - keep exploring and learning!",
-        "🚀 Design expertise comes from practice and exploration - you're on the right track!",
-        "🔄 Learning is an iterative process - just like good design itself!"
-      ];
-      feedbackMessage += incorrectConclusions[Math.floor(Math.random() * incorrectConclusions.length)];
-    }
-    
-    // Add design quote for extra motivation (occasionally)
-    if (Math.random() > 0.7) { // 30% chance to add a quote
-      const designQuotes = [
-        "\n\n💬 *\"Design is not just what it looks like and feels like. Design is how it works.\"* - Steve Jobs",
-        "\n\n💬 *\"Good design is obvious. Great design is transparent.\"* - Joe Sparano",
-        "\n\n💬 *\"Simplicity is the ultimate sophistication.\"* - Leonardo da Vinci",
-        "\n\n💬 *\"Design is intelligence made visible.\"* - Alina Wheeler",
-        "\n\n💬 *\"Design is not a single object or dimension. Design is messy and complex.\"* - Natasha Jen"
-      ];
-      feedbackMessage += designQuotes[Math.floor(Math.random() * designQuotes.length)];
-    }
-
-    await incrementQuizCount(userId);
-
-    // Send the enhanced feedback
     try {
-      await ctx.api.sendMessage(
-        userId,  // Explicitly use the userId as the chat_id
-        feedbackMessage,
-        { parse_mode: 'Markdown' }
-      );
+      // Use the formatQuizExplanation utility to get a nicely formatted HTML explanation
+      const formattedExplanation = formatQuizExplanation({
+        question: quizData.question,
+        options: quizData.options,
+        correctIndex: quizData.correctOption,
+        explanation: quizData.explanation,
+        option_explanations: quizData.option_explanations
+      });
+      
+      // Send the nicely formatted HTML explanation
+      await ctx.api.sendMessage(userId, formattedExplanation, { 
+        parse_mode: 'HTML'
+      });
+      
       feedbackSent = true;
+      
     } catch (feedbackError) {
-      logger.error(`Error sending primary feedback: ${feedbackError instanceof Error ? feedbackError.message : String(feedbackError)}`);
-    }
-    
-    // ENSURE EXPLANATION IS SENT: Always send a direct explanation message
-    // Only send this if the primary feedback wasn't sent or for complex explanations
-    if (!feedbackSent || (quizData.option_explanations && quizData.option_explanations.length > 0 && quizData.option_explanations.some(e => e.length > 100))) {
+      logger.error(`Error sending formatted explanation: ${feedbackError instanceof Error ? feedbackError.message : String(feedbackError)}`);
+      
+      // If the HTML formatting failed, try with simple Markdown as fallback
       try {
-        // Send a clear explanation only if needed
-        let directExplanation: string;
+        await ctx.reply(feedbackMessage, { 
+          parse_mode: 'Markdown'
+        });
         
-        if (isCorrect) {
-          directExplanation = `✅ *Why this answer is correct:*\n\n`;
-        } else {
-          directExplanation = `🔍 *Why the correct answer is "${quizData.options[quizData.correctOption]}":*\n\n`;
-        }
+        feedbackSent = true;
         
-        // Use the most detailed explanation available
-        if (quizData.option_explanations && quizData.option_explanations[quizData.correctOption]) {
-          // Always explain the correct answer
-          let finalExplanation = quizData.option_explanations[quizData.correctOption];
-          
-          // If the user's answer is incorrect, modify any "Correct!" prefix
-          if (!isCorrect) {
-            finalExplanation = finalExplanation
-              .replace(/^Correct!/i, "")
-              .replace(/^✅\s*Correct!/i, "");
-          }
-          
-          directExplanation += finalExplanation;
-        } else if (quizData.explanation) {
-          // Fall back to general explanation
-          let finalExplanation = quizData.explanation;
-          
-          // If the user's answer is incorrect, modify any "Correct!" prefix
-          if (!isCorrect) {
-            finalExplanation = finalExplanation
-              .replace(/^Correct!/i, "")
-              .replace(/^✅\s*Correct!/i, "");
-          }
-          
-          directExplanation += finalExplanation;
-        } else {
-          // Last resort
-          directExplanation += `This answer relates to best practices in ${quizData.theme || 'UI/UX design'}.`;
-        }
-        
-        // Send direct explanation with explicit chat ID
-        await ctx.api.sendMessage(userId, directExplanation, { parse_mode: 'Markdown' });
-      } catch (directExplError) {
-        logger.error(`Error sending direct explanation: ${directExplError instanceof Error ? directExplError.message : String(directExplError)}`);
+      } catch (markdownError) {
+        logger.error(`Error sending Markdown feedback: ${markdownError instanceof Error ? markdownError.message : String(markdownError)}`);
         
         // Last resort: try plain text with no formatting
         try {
-          await ctx.api.sendMessage(userId, `Explanation: ${quizData.explanation || 'This question tests your knowledge of important UI/UX principles.'}`);
+          await ctx.reply(`Explanation: ${quizData.explanation || 'This question tests your knowledge of important UI/UX principles.'}`);
+          
+          feedbackSent = true;
+          
         } catch (finalError) {
           logger.error(`FINAL ERROR sending explanation: ${finalError instanceof Error ? finalError.message : String(finalError)}`);
         }
@@ -295,66 +182,13 @@ export async function sendQuiz(ctx: BotContext, userId: number, theme: string): 
       hasOptionExplanations: !!quiz.option_explanations && quiz.option_explanations.length > 0
     });
     
-    // Add emoji to the question to make it more engaging
-    const enhancedQuestion = `🧠 ${quiz.question} 🧠`;
+    // Use the new utility function to send consistently formatted quiz
+    await sendFormattedQuiz(ctx, userId, quiz, theme);
     
-    // Convert string options to InputPollOption format and enhance with emojis
-    const enhancedOptions = quiz.options.map(option => {
-      if (/color|palette|hue|contrast|saturation/i.test(option)) {
-        return { text: `🎨 ${option}` };
-      } else if (/user|customer|audience|person|client/i.test(option)) {
-        return { text: `👤 ${option}` };
-      } else if (/click|tap|swipe|interaction|navigate/i.test(option)) {
-        return { text: `🖱️ ${option}` };
-      } else if (/principle|theory|concept|rule|guideline/i.test(option)) {
-        return { text: `📚 ${option}` };
-      } else if (/figma|sketch|adobe|tool|software/i.test(option)) {
-        return { text: `🛠️ ${option}` };
-      } else {
-        return { text: `✨ ${option}` };
-      }
+    logActivity('quiz_sent', userId, 'Quiz successfully sent to user', {
+      theme,
+      fromCache
     });
-    
-    logActivity('sending_quiz', userId, 'Sending quiz to user');
-    
-    // Send the quiz as a poll
-    const poll = await ctx.api.sendPoll(
-      userId,
-      enhancedQuestion,
-      enhancedOptions,
-      {
-        is_anonymous: false,
-        type: 'quiz',
-        correct_option_id: quiz.correctIndex,
-        explanation: `The correct answer will be revealed after you make your choice.`,
-        explanation_parse_mode: 'HTML'
-      }
-    );
-    
-    // Store quiz data for later, including option explanations
-    if (poll.poll) {
-      // Generate unique IDs if not available
-      const lessonId = `lesson-${Date.now()}`;
-      const quizId = `quiz-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-      
-      await activeQuizzes.set(poll.poll.id, {
-        correctOption: quiz.correctIndex,
-        options: quiz.options,
-        question: quiz.question,
-        theme: theme,
-        explanation: quiz.explanation || undefined, // Store general explanation for correct answer
-        option_explanations: quiz.option_explanations, // Store explanations for each option
-        lessonId: lessonId, // Use the generated lessonId
-        quizId: quizId // Use the generated quizId
-      });
-      
-      logActivity('quiz_tracking_stored', userId, 'Quiz data stored for answer tracking', {
-        pollId: poll.poll.id,
-        hasExplanations: !!quiz.option_explanations,
-        explanationCount: quiz.option_explanations?.length || 0,
-        hasGeneralExplanation: !!quiz.explanation
-      });
-    }
     
   } catch (error) {
     logger.error(`Error sending quiz: ${error instanceof Error ? error.message : String(error)}`);
@@ -370,5 +204,34 @@ export async function sendQuiz(ctx: BotContext, userId: number, theme: string): 
       "🤔 Try to identify 3 key points you can apply to your next design project!",
       { parse_mode: 'Markdown' }
     );
+  }
+}
+
+/**
+ * Mark a quiz as answered in the database
+ * @param userId User ID who answered
+ * @param pollId Poll ID that was answered
+ * @param isCorrect Whether the answer was correct
+ */
+async function markQuizAsAnswered(userId: number, pollId: string, isCorrect: boolean): Promise<void> {
+  try {
+    const supabase = getSupabaseClient();
+    
+    const { error } = await supabase
+      .from('quiz_deliveries')
+      .update({
+        answered: true,
+        answered_at: new Date().toISOString(),
+        answer_correct: isCorrect
+      })
+      .match({ poll_id: pollId, user_id: userId });
+      
+    if (error) {
+      logger.error(`Error marking quiz as answered: ${error.message}`);
+    } else {
+      logger.info(`Marked quiz ${pollId} as answered by user ${userId}, correct: ${isCorrect}`);
+    }
+  } catch (error) {
+    logger.error(`Error in markQuizAsAnswered: ${error instanceof Error ? error.message : String(error)}`);
   }
 } 

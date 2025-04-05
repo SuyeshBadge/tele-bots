@@ -257,6 +257,76 @@ export class QuizRepository {
       return 0;
     }
   }
+  
+  /**
+   * Get quizzes that were sent but not answered within a certain timeframe
+   * @param minMinutes Minimum minutes since quiz was sent
+   * @param maxHours Maximum hours since quiz was sent
+   * @returns Array of unanswered quizzes with user IDs
+   */
+  async getUnansweredQuizzes(minMinutes: number = 30, maxHours: number = 24): Promise<Array<{
+    pollId: string;
+    question: string;
+    theme: string;
+    userId: number;
+    createdAt: string;
+  }>> {
+    try {
+      const supabase = getSupabaseClient();
+      
+      // Calculate time range
+      const now = new Date();
+      const minTime = new Date(now);
+      minTime.setMinutes(now.getMinutes() - minMinutes);
+      
+      const maxTime = new Date(now);
+      maxTime.setHours(now.getHours() - maxHours);
+      
+      // First, get quizzes that are within the time range
+      const { data: quizData, error: quizError } = await supabase
+        .from('quizzes')
+        .select('poll_id, question, theme, created_at')
+        .gt('created_at', maxTime.toISOString())  // Less than maxHours old
+        .lt('created_at', minTime.toISOString());  // At least minMinutes old
+      
+      if (quizError || !quizData || quizData.length === 0) {
+        if (quizError) {
+          this.logSupabaseError('getUnansweredQuizzes - quiz fetch', quizError);
+        }
+        return [];
+      }
+      
+      // Get quiz deliveries to find out which users received these quizzes
+      const { data: deliveryData, error: deliveryError } = await supabase
+        .from('quiz_deliveries')
+        .select('poll_id, user_id, answered')
+        .in('poll_id', quizData.map(q => q.poll_id))
+        .eq('answered', false);
+      
+      if (deliveryError) {
+        this.logSupabaseError('getUnansweredQuizzes - delivery fetch', deliveryError);
+        return [];
+      }
+      
+      // Combine the data
+      const unansweredQuizzes = deliveryData?.map(delivery => {
+        const quizInfo = quizData.find(q => q.poll_id === delivery.poll_id);
+        return {
+          pollId: delivery.poll_id,
+          userId: delivery.user_id,
+          question: quizInfo?.question || 'UI/UX Quiz',
+          theme: quizInfo?.theme || 'UI/UX Design',
+          createdAt: quizInfo?.created_at || new Date().toISOString()
+        };
+      }) || [];
+      
+      logger.info(`Found ${unansweredQuizzes.length} unanswered quizzes to remind users about`);
+      return unansweredQuizzes;
+    } catch (error) {
+      this.logSupabaseError('getUnansweredQuizzes', error);
+      return [];
+    }
+  }
 }
 
 // Export a singleton instance

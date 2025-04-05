@@ -1,0 +1,143 @@
+@startuml Class Diagram
+
+title UI/UX Bot Class Diagram
+
+' Core bot classes
+class UIUXLessonBot {
+  -bot: Bot<BotContext>
+  +scheduler: Scheduler
+  -isShuttingDown: boolean
+  +constructor()
+  -updateHealthStatus(): Promise<void>
+  -setupErrorHandling(): void
+  -setupCommandHandlers(): void
+  -sendScheduledLesson(): Promise<void>
+  -getUptime(startupTime: string): string
+  +shutdown(): Promise<void>
+  +start(): Promise<void>
+}
+
+class Scheduler {
+  -jobs: schedule.Job[]
+  -lessonCallback: () => Promise<void>
+  -cleanupJob: schedule.Job | null
+  +constructor(lessonCallback: () => Promise<void>)
+  +start(): void
+  +stop(): void
+  +getNextScheduledTime(): Date | null
+}
+
+' Handlers
+class CommandHandlers {
+  +startCommand(ctx: BotContext): Promise<void>
+  +helpCommand(ctx: BotContext): Promise<void>
+  +errorHandler(error: Error, ctx: BotContext): Promise<void>
+  +unknownCommand(ctx: BotContext): Promise<void>
+  +unsubscribeCommand(ctx: BotContext): Promise<void>
+  +lessonCommand(ctx: BotContext): Promise<void>
+}
+
+class QuizHandlers {
+  +onPollAnswer(ctx: BotContext): Promise<void>
+  +sendQuiz(ctx: BotContext, userId: number, theme: string): Promise<void>
+}
+
+' API Clients
+class ClaudeClient {
+  -_lessonCache: LessonCache
+  -_quizCache: QuizCache
+  -_explanationCache: ExplanationCache
+  -generateLessonContent(themesToAvoid: string[], quizzesToAvoid: string[]): Promise<LessonData>
+  +generateLesson(themesToAvoid: string[], quizzesToAvoid: string[]): Promise<LessonSections>
+  +generateQuiz(theme?: string): Promise<QuizData>
+  -generateDefaultExplanations(options: string[], correctIndex: number, theme: string): string[]
+  +getRandomTheme(): string
+}
+
+class ImageManager {
+  +getImageForLesson(theme: string): Promise<{url: string, localPath: string} | null>
+}
+
+' Repository classes
+class LessonRepository {
+  +saveLesson(lesson: LessonData): Promise<LessonData>
+  +getRecentThemes(): Promise<string[]>
+  +getRecentQuizzes(): Promise<string[]>
+  +trackLessonDelivery(userId: number, lessonId: string): Promise<void>
+}
+
+class QuizRepository {
+  +saveQuiz(quiz: QuizData): Promise<void>
+  +getQuiz(quizId: string): Promise<QuizData | null>
+  +cleanupExpiredQuizzes(): Promise<number>
+}
+
+' Database/Persistence
+class Persistence {
+  +getSubscriber(id: number): Promise<Subscriber | null>
+  +getAllSubscribers(): Promise<Subscriber[]>
+  +createSubscriber(subscriber: Subscriber): Promise<void>
+  +updateSubscriber(id: number, data: Partial<Subscriber>): Promise<void>
+  +deleteSubscriber(id: number): Promise<void>
+  +incrementLessonCount(id: number): Promise<void>
+  +incrementQuizCount(id: number): Promise<void>
+  +getHealthStatus(): Promise<HealthStatus | null>
+  +updateHealthStatus(data: HealthStatus): Promise<void>
+}
+
+' Data Types
+class LessonSections {
+  +title: string
+  +theme: string
+  +contentPoints: string[]
+  +quizQuestion: string
+  +quizOptions: string[]
+  +correctOptionIndex: number
+  +explanation: string
+  +optionExplanations: string[]
+  +vocabulary: {term: string, definition: string, example: string}[]
+  +videoQuery?: string[]
+  +example_link?: {url: string, description: string}
+}
+
+class QuizData {
+  +question: string
+  +options: string[]
+  +correctIndex: number
+  +explanation?: string
+  +option_explanations?: string[]
+}
+
+class Subscriber {
+  +id: number
+  +firstName?: string
+  +lastName?: string
+  +username?: string
+  +joinedAt: string
+  +lastActivity: string
+  +lessonCount: number
+  +quizCount: number
+  +isAdmin: boolean
+}
+
+' Relationships
+UIUXLessonBot "1" *-- "1" Scheduler : contains
+UIUXLessonBot "1" --> "*" CommandHandlers : uses
+UIUXLessonBot "1" --> "*" QuizHandlers : uses
+UIUXLessonBot "1" --> "1" LessonRepository : uses
+UIUXLessonBot "1" --> "1" QuizRepository : uses
+UIUXLessonBot "1" --> "1" ClaudeClient : uses
+UIUXLessonBot "1" --> "1" ImageManager : uses
+UIUXLessonBot "1" --> "1" Persistence : uses
+
+CommandHandlers "1" --> "1" Persistence : uses
+QuizHandlers "1" --> "1" Persistence : uses
+QuizHandlers "1" --> "1" ClaudeClient : uses
+
+ClaudeClient --> LessonSections : produces
+ClaudeClient --> QuizData : produces
+
+LessonRepository ..> Persistence : uses
+QuizRepository ..> Persistence : uses
+
+@enduml 
