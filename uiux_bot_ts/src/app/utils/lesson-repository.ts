@@ -9,6 +9,7 @@ import { logger } from './logger';
 import { settings } from '../config/settings';
 import { getSupabaseClient } from '../../database/supabase-client';
 import { LessonData } from './lesson-types';
+import { PoolType } from '../api/batch-processor';
 
 // Supabase DB model
 interface LessonDBModel {
@@ -30,6 +31,10 @@ interface LessonDBModel {
     description: string;
   };
   video_query?: string[];
+  pool_type?: PoolType;
+  is_used?: boolean;
+  used_at?: string;
+  batch_id?: string;
 }
 
 /**
@@ -92,7 +97,11 @@ export class LessonRepository {
       optionExplanations: dbModel.option_explanations,
       imageUrl: dbModel.image_url,
       example_link: dbModel.example_link,
-      videoQuery: dbModel.video_query
+      videoQuery: dbModel.video_query,
+      pool_type: dbModel.pool_type,
+      is_used: dbModel.is_used,
+      used_at: dbModel.used_at,
+      batch_id: dbModel.batch_id
     };
   }
   
@@ -121,7 +130,11 @@ export class LessonRepository {
         option_explanations: appModel.optionExplanations,
         image_url: appModel.imageUrl,
         example_link: appModel.example_link,
-        video_query: appModel.videoQuery
+        video_query: appModel.videoQuery,
+        pool_type: appModel.pool_type,
+        is_used: appModel.is_used,
+        used_at: appModel.used_at,
+        batch_id: appModel.batch_id
       };
       
       // Log the output data
@@ -166,28 +179,110 @@ export class LessonRepository {
   }
   
   /**
-   * Log Supabase errors with proper formatting
+   * Get available lessons from a pool
+   * @param poolType The pool type to get lessons from
+   * @param limit Maximum number of lessons to return
+   * @returns Array of available lessons
    */
-  private logSupabaseError(operation: string, error: any): void {
-    const errorMessage = `Supabase error in ${operation}: ${error instanceof Error ? error.message : String(error)}`;
-    logger.error(errorMessage);
-    
-    // Log additional details if available
-    if (error instanceof Error && error.stack) {
-      logger.error(`Stack trace: ${error.stack}`);
+  async getAvailableLessonsFromPool(poolType: PoolType, limit: number = 10): Promise<LessonData[]> {
+    try {
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from('lessons')
+        .select('*')
+        .eq('pool_type', poolType)
+        .eq('is_used', false)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      
+      if (error) {
+        this.logSupabaseError(`getAvailableLessonsFromPool for ${poolType}`, error);
+        return [];
+      }
+      
+      if (!data || data.length === 0) {
+        logger.info(`No available lessons found in ${poolType} pool`);
+        return [];
+      }
+      
+      logger.info(`Found ${data.length} available lessons in ${poolType} pool`);
+      return data.map(lesson => this.fromDbModel(lesson as LessonDBModel));
+    } catch (error) {
+      this.logSupabaseError(`getAvailableLessonsFromPool for ${poolType}`, error);
+      return [];
     }
-    
-    // Log Supabase-specific error details
-    if (error && typeof error === 'object') {
-      if (error.code) {
-        logger.error(`Error code: ${error.code}`);
+  }
+  
+  /**
+   * Mark a lesson as used
+   * @param lessonId The ID of the lesson to mark as used
+   * @returns The updated lesson or null if not found
+   */
+  async markLessonAsUsed(lessonId: string): Promise<LessonData | null> {
+    try {
+      const supabase = getSupabaseClient();
+      
+      // Update the lesson status
+      const { data, error } = await supabase
+        .from('lessons')
+        .update({
+          is_used: true,
+          used_at: new Date().toISOString()
+        })
+        .eq('id', lessonId)
+        .select('*')
+        .single();
+      
+      if (error) {
+        this.logSupabaseError(`markLessonAsUsed for ${lessonId}`, error);
+        return null;
       }
-      if (error.details) {
-        logger.error(`Error details: ${error.details}`);
+      
+      if (!data) {
+        logger.warn(`Lesson with ID ${lessonId} not found for marking as used`);
+        return null;
       }
-      if (error.hint) {
-        logger.error(`Error hint: ${error.hint}`);
+      
+      logger.info(`Successfully marked lesson ${lessonId} as used`);
+      return this.fromDbModel(data as LessonDBModel);
+    } catch (error) {
+      this.logSupabaseError(`markLessonAsUsed for ${lessonId}`, error);
+      return null;
+    }
+  }
+  
+  /**
+   * Get pool statistics
+   * @param poolType The pool type to get statistics for
+   * @returns Pool statistics or null if not found
+   */
+  async getPoolStats(poolType: PoolType): Promise<{
+    total_lessons: number;
+    available_lessons: number;
+    last_generated: string;
+  } | null> {
+    try {
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from('lesson_pool_stats')
+        .select('total_lessons, available_lessons, last_generated')
+        .eq('pool_type', poolType)
+        .single();
+      
+      if (error) {
+        this.logSupabaseError(`getPoolStats for ${poolType}`, error);
+        return null;
       }
+      
+      if (!data) {
+        logger.info(`No pool stats found for ${poolType}`);
+        return null;
+      }
+      
+      return data;
+    } catch (error) {
+      this.logSupabaseError(`getPoolStats for ${poolType}`, error);
+      return null;
     }
   }
   
@@ -243,96 +338,114 @@ export class LessonRepository {
   }
   
   /**
-   * Get the most recent lessons
-   * @param limit Maximum number of lessons to return
-   * @returns Array of lessons
+   * Get recent themes to avoid duplication
+   * @param limit Number of recent themes to get
+   * @returns Array of recent themes
    */
-  async getRecentLessons(limit: number = 10): Promise<LessonData[]> {
+  async getRecentThemes(limit: number = 10): Promise<string[]> {
     try {
       const supabase = getSupabaseClient();
       const { data, error } = await supabase
         .from('lessons')
-        .select('*')
+        .select('theme')
         .order('created_at', { ascending: false })
+        .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
         .limit(limit);
       
       if (error) {
-        this.logSupabaseError('getRecentLessons', error);
+        this.logSupabaseError('getRecentThemes', error);
         return [];
       }
       
-      return data ? data.map(lesson => this.fromDbModel(lesson as LessonDBModel)) : [];
+      if (!data || data.length === 0) {
+        return [];
+      }
+      
+      const uniqueThemes = Array.from(new Set(data.map(item => item.theme)));
+      return uniqueThemes;
     } catch (error) {
-      this.logSupabaseError('getRecentLessons', error);
+      this.logSupabaseError('getRecentThemes', error);
       return [];
     }
   }
   
   /**
-   * Delete a lesson
-   * @param id The lesson ID
-   * @returns True if deleted, false otherwise
+   * Get recent quizzes to avoid duplication
+   * @param limit Number of recent quizzes to get
+   * @returns Array of recent quiz questions
    */
-  async deleteLesson(id: string): Promise<boolean> {
+  async getRecentQuizzes(limit: number = 10): Promise<string[]> {
     try {
       const supabase = getSupabaseClient();
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('lessons')
-        .delete()
-        .eq('id', id);
+        .select('quiz_question')
+        .order('created_at', { ascending: false })
+        .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+        .limit(limit);
       
       if (error) {
-        this.logSupabaseError(`deleteLesson for id ${id}`, error);
-        return false;
+        this.logSupabaseError('getRecentQuizzes', error);
+        return [];
       }
       
-      logger.info(`Deleted lesson with ID ${id} from Supabase`);
-      return true;
+      if (!data || data.length === 0) {
+        return [];
+      }
+      
+      // Filter out empty quizzes and get unique questions
+      const validQuizzes = data
+        .filter(item => item.quiz_question && item.quiz_question.length > 0)
+        .map(item => item.quiz_question as string);
+      
+      const uniqueQuizzes = Array.from(new Set(validQuizzes));
+      return uniqueQuizzes;
     } catch (error) {
-      this.logSupabaseError(`deleteLesson for id ${id}`, error);
-      return false;
+      this.logSupabaseError('getRecentQuizzes', error);
+      return [];
     }
   }
   
   /**
-   * Track a lesson delivery to a user
-   * @param userId The user ID
+   * Track lesson delivery to a subscriber
+   * @param subscriberId The subscriber ID
    * @param lessonId The lesson ID
-   * @returns True if successful
+   * @param source Optional source of the lesson (e.g., 'scheduled', 'on-demand')
    */
-  async trackLessonDelivery(userId: number, lessonId: string): Promise<boolean> {
+  async trackLessonDelivery(subscriberId: string | number, lessonId: string, source?: string): Promise<void> {
     try {
       const supabase = getSupabaseClient();
-      const deliveryData = {
-        user_id: userId,
-        lesson_id: lessonId,
-        delivered_at: new Date().toISOString(),
-        source: 'bot'
-      };
       
-      // Try first table name: lesson_delivery
-      let result = await supabase
+      // Check if the table exists first - using the correct table name lesson_delivery
+      const { error: checkError } = await supabase
         .from('lesson_delivery')
-        .insert(deliveryData);
+        .select('id')
+        .limit(1);
       
-      // If that fails, try alternative table: user_lessons
-      if (result.error && result.error.code === '42P01') {
-        logger.info('Trying alternative table name for lesson delivery tracking');
-        result = await supabase
-          .from('user_lessons')
-          .insert(deliveryData);
+      // If the table doesn't exist, log a warning but don't fail
+      if (checkError && checkError.code === '42P01') { // Table doesn't exist
+        logger.warn(`Cannot track lesson delivery because 'lesson_delivery' table does not exist.`);
+        return;
       }
       
-      if (result.error) {
-        this.logSupabaseError(`trackLessonDelivery for user ${userId}, lesson ${lessonId}`, result.error);
-        return false;
-      }
+      // Convert subscriberId to number if it's a string (user_id is bigint)
+      const userId = typeof subscriberId === 'string' ? parseInt(subscriberId, 10) : subscriberId;
       
-      logger.info(`Tracked lesson ${lessonId} delivery to user ${userId}`);
-      return true;
+      // Insert a record in the delivery tracking table with the correct column names
+      const { error } = await supabase
+        .from('lesson_delivery')
+        .insert({
+          user_id: userId,
+          lesson_id: lessonId,
+          delivered_at: new Date().toISOString(),
+          source: source || 'bot'
+        });
+      
+      if (error) {
+        this.logSupabaseError(`trackLessonDelivery for subscriber ${subscriberId} and lesson ${lessonId}`, error);
+      }
     } catch (error) {
-      this.logSupabaseError(`trackLessonDelivery for user ${userId}, lesson ${lessonId}`, error);
-      return false;
+      this.logSupabaseError(`trackLessonDelivery for subscriber ${subscriberId} and lesson ${lessonId}`, error);
     }
   }
   
@@ -371,113 +484,44 @@ export class LessonRepository {
   }
   
   /**
-   * Handle Supabase errors with exit
+   * Get a count of lessons
+   * @returns Total number of lessons
    */
-  private handleSupabaseError(operation: string, error: any): never {
-    return this.logSupabaseError(operation, error) as never;
-  }
-  
-  /**
-   * Get recent lesson deliveries for a specific user
-   * @param userId The user ID
-   * @param limit Maximum number of deliveries to return
-   * @returns Array of lesson delivery records
-   */
-  async getUserRecentLessonDeliveries(userId: number, limit: number = 10): Promise<{ userId: number; lessonId: string; deliveredAt: string }[]> {
+  async getLessonCount(): Promise<number> {
     try {
       const supabase = getSupabaseClient();
+      const { count, error } = await supabase
+        .from('lessons')
+        .select('*', { count: 'exact', head: true });
       
-      // Try first with lesson_delivery table
-      let result = await supabase
-        .from('lesson_delivery')
-        .select('user_id, lesson_id, delivered_at')
-        .eq('user_id', userId)
-        .order('delivered_at', { ascending: false })
-        .limit(limit);
-      
-      // If that fails, try with user_lessons table
-      if (result.error && result.error.code === '42P01') {
-        result = await supabase
-          .from('user_lessons')
-          .select('user_id, lesson_id, delivered_at')
-          .eq('user_id', userId)
-          .order('delivered_at', { ascending: false })
-          .limit(limit);
+      if (error) {
+        this.logSupabaseError('getLessonCount', error);
+        return 0;
       }
       
-      if (result.error) {
-        this.logSupabaseError(`getUserRecentLessonDeliveries for user ${userId}`, result.error);
-        return [];
-      }
-      
-      return result.data ? result.data.map(item => ({
-        userId: item.user_id,
-        lessonId: item.lesson_id,
-        deliveredAt: item.delivered_at
-      })) : [];
+      return count || 0;
     } catch (error) {
-      this.logSupabaseError(`getUserRecentLessonDeliveries for user ${userId}`, error);
-      return [];
+      this.logSupabaseError('getLessonCount', error);
+      return 0;
     }
   }
   
   /**
-   * Get themes from lessons created in the last month
-   * @returns Array of unique themes
+   * Log Supabase error with context
+   * @param context Context or operation where the error occurred
+   * @param error The Supabase error object
    */
-  async getRecentThemes(): Promise<string[]> {
-    try {
-      const supabase = getSupabaseClient();
-      const oneMonthAgo = new Date();
-      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
-      
-      const { data, error } = await supabase
-        .from('lessons')
-        .select('theme')
-        .gte('created_at', oneMonthAgo.toISOString())
-        .order('created_at', { ascending: false });
-      
-      if (error) {
-        this.logSupabaseError('getRecentThemes', error);
-        return [];
-      }
-      
-      // Extract unique themes
-      const themes = data ? [...new Set(data.map(lesson => lesson.theme))] : [];
-      return themes;
-    } catch (error) {
-      this.logSupabaseError('getRecentThemes', error);
-      return [];
+  private logSupabaseError(context: string, error: any): void {
+    const errorMessage = error instanceof Error ? error.message : 
+      (error?.message || error?.error_description || String(error));
+    logger.error(`Supabase error in ${context}: ${errorMessage}`);
+    
+    if (error?.code) {
+      logger.error(`Supabase error code: ${error.code}`);
     }
-  }
-
-  /**
-   * Get recent quizzes from lessons created in the last month
-   * @returns Array of unique quizzes
-   */
-  async getRecentQuizzes(): Promise<string[]> {
-    try {
-      const supabase = getSupabaseClient();
-      const oneMonthAgo = new Date();
-      oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
-      
-      const { data, error } = await supabase
-        .from('lessons')
-        .select('quiz_question')
-        .gte('created_at', oneMonthAgo.toISOString())
-        .order('created_at', { ascending: false });
-      
-      if (error) {
-        this.logSupabaseError('getRecentQuizzes', error);
-        return [];
-      }
-      
-      // Extract unique quizzes
-      const quizzes = data ? [...new Set(data.map(lesson => lesson.quiz_question))] : [];
-      return quizzes;
-    } catch (error) {
-      this.logSupabaseError('getRecentQuizzes', error);
-      return [];
+    
+    if (error?.details) {
+      logger.error(`Supabase error details: ${error.details}`);
     }
   }
 }

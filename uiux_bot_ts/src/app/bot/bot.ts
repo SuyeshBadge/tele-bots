@@ -15,7 +15,8 @@ import {
   incrementQuizCount,
   getHealthStatus,
   updateHealthStatus,
-  initPersistence
+  initPersistence,
+  simpleUpdateHealthStatus
 } from '../utils/persistence';
 import { quizRepository } from '../utils/quiz-repository';
 import { lessonRepository } from '../utils/lesson-repository';
@@ -23,12 +24,15 @@ import { Scheduler } from './scheduler';
 import { sanitizeHtmlForTelegram } from '../utils/telegram-utils';
 import { BotContext, SessionData } from './handlers/types';
 import { startCommand, unsubscribeCommand, helpCommand, lessonCommand } from './handlers/utility-handlers';
+import { healthCommand, batchStatusCommand, checkBatchesCommand } from './handlers/admin-handlers';
 import { onPollAnswer } from './handlers/quiz-handlers';
 import { LessonSections } from '../api/claude-client';
 import { sendLessonToRecipient, formatLessonContent, formatVocabulary } from '../utils/lesson-utils';
 import { sendFormattedQuiz, sendFormattedQuizWithBot } from '../utils/quiz-utils';
 import { getImageForLesson } from '../api/image-manager';
 import { LessonData } from '../utils/lesson-types';
+import { getScheduledLesson } from '../utils/lesson-pool-utils';
+import batchProcessor from '../api/batch-processor';
 
 // Configure logger
 const logger = getChildLogger('bot');
@@ -82,7 +86,7 @@ export class UIUXLessonBot {
     this.setupErrorHandling();
     
     // Setup command handlers
-    this.setupCommandHandlers();
+    this.setupCommands();
     
     logger.info('Bot instance created');
   }
@@ -152,21 +156,20 @@ export class UIUXLessonBot {
   /**
    * Set up command handlers for the bot
    */
-  private setupCommandHandlers(): void {
-    // Start command - Subscribe to the bot
-    this.bot.command('start', startCommand);
-
-    // Stop command - Unsubscribe from the bot
-    this.bot.command('stop', unsubscribeCommand);
-
-    // Help command - Show help message
-    this.bot.command('help', helpCommand);
-
-    // Lesson command - Request a UI/UX lesson
-    this.bot.command('lesson', lessonCommand);
-
+  private setupCommands(): void {
+    // Basic commands
+    this.bot.command('start', async (ctx) => startCommand(ctx));
+    this.bot.command('help', async (ctx) => helpCommand(ctx));
+    this.bot.command('unsubscribe', async (ctx) => unsubscribeCommand(ctx));
+    this.bot.command('lesson', async (ctx) => lessonCommand(ctx));
+    
+    // Admin commands - register them but they'll be guarded by admin checks
+    this.bot.command('health', async (ctx) => healthCommand(ctx));
+    this.bot.command('batch', async (ctx) => batchStatusCommand(ctx));
+    this.bot.command('checkbatches', async (ctx) => checkBatchesCommand(ctx));
+    
     // Poll answer handler
-    this.bot.on('poll_answer', onPollAnswer);
+    this.bot.on('poll_answer', async (ctx) => onPollAnswer(ctx));
   }
 
   /**
@@ -175,91 +178,40 @@ export class UIUXLessonBot {
   private async sendScheduledLesson(): Promise<void> {
     logger.info('Sending scheduled lesson to all subscribers');
     
-    const subscribers = await getAllSubscribers();
-    
-    if (subscribers.length === 0) {
-      logger.info('No subscribers to send lesson to');
-      return;
-    }
-    
-    // Generate lesson content, avoiding recent themes and quizzes
     try {
-      // Get recent themes from the last month to avoid repetition
-      const recentThemes = await lessonRepository.getRecentThemes();
-      const recentQuizzes = await lessonRepository.getRecentQuizzes();
+      // Get all active subscribers
+      const subscribers = await getAllSubscribers();
       
-      // Generate lesson with themes to avoid
-      const lessonSections = await claudeClient.generateLesson(recentThemes, recentQuizzes);
-      
-      // Validate lessonSections contains required data
-      if (!lessonSections || !lessonSections.contentPoints || !Array.isArray(lessonSections.contentPoints)) {
-        logger.error(`Invalid lesson sections received: ${JSON.stringify(lessonSections)}`);
-        throw new Error('Invalid lesson data received from Claude');
+      if (!subscribers || subscribers.length === 0) {
+        logger.info('No subscribers found for scheduled lesson delivery');
+        return;
       }
       
-      // Ensure contentPoints are properly formatted with emojis
-      const contentPoints = lessonSections.contentPoints.map(point => {
-        if (!point || typeof point !== 'string') return "🔹 Key UI/UX concept";
-        if (!point.match(/^\p{Emoji}/u)) return `🔹 ${point}`;
-        return point;
-      });
+      logger.info(`Found ${subscribers.length} subscribers for scheduled lesson delivery`);
       
-      // Import formatting functions from lesson-utils
-      const utils = await import('../utils/lesson-utils');
+      // Get a lesson from the scheduled pool
+      const lessonData = await getScheduledLesson();
       
-      // Use the same formatting functions used in manual lessons
-      const formattedContent = utils.formatLessonContent({
-        ...lessonSections,
-        contentPoints
-      });
+      if (!lessonData) {
+        logger.error('Failed to get a scheduled lesson, skipping delivery');
+        return;
+      }
       
-      // Ensure vocabulary has required fields
-      const vocabulary = (lessonSections.vocabulary || []).map(item => {
-        if (!item || typeof item !== 'object') {
-          return {
-            term: "UI/UX Term",
-            definition: "A key concept in user interface design",
-            example: "Using this term in a real design scenario"
-          };
-        }
-        return {
-          term: item.term || "UI/UX Term",
-          definition: item.definition || "A key concept in user interface design",
-          example: item.example || "Using this term in a real design scenario"
-        };
-      });
+      logger.info(`Using lesson "${lessonData.title}" for scheduled delivery`);
       
-      const formattedVocabulary = utils.formatVocabulary(vocabulary);
-      
-      // Convert LessonSections to LessonData once using proper formatting
-      const lessonData: LessonData = {
-        id: `lesson-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        title: lessonSections.title,
-        theme: lessonSections.theme,
-        content: formattedContent,
-        vocabulary: formattedVocabulary,
-        hasVocabulary: vocabulary.length > 0,
-        createdAt: new Date().toISOString(),
-        quizQuestion: lessonSections.quizQuestion,
-        quizOptions: lessonSections.quizOptions,
-        quizCorrectIndex: lessonSections.correctOptionIndex,
-        explanation: lessonSections.explanation,
-        optionExplanations: lessonSections.optionExplanations,
-        example_link: lessonSections.example_link,
-        videoQuery: lessonSections.videoQuery
-      };
-      
-      // Get an image for the lesson
-      let imageUrl = null;
-      
+      // Generate or get image based on the theme
+      let imageUrl: string | undefined = undefined;
       try {
-        const imageDetails = await getImageForLesson(lessonSections.theme);
-        if (imageDetails && imageDetails.url) {
-          // Prioritize remote URLs for Telegram
-          imageUrl = imageDetails.url;
+        if (lessonData.theme) {
+          const imageDetails = await getImageForLesson(lessonData.theme);
+          if (imageDetails && imageDetails.url) {
+            imageUrl = imageDetails.url;
+            logger.info(`Generated/retrieved image for lesson: ${imageUrl}`);
+          }
         }
-      } catch (error) {
-        logger.error(`Error getting image for scheduled lesson: ${error instanceof Error ? error.message : String(error)}`);
+      } catch (imageError) {
+        logger.error(`Error generating image: ${imageError instanceof Error ? imageError.message : String(imageError)}`);
+        // Continue without an image
       }
       
       // Save lesson to database once before sending to any subscribers
@@ -271,6 +223,9 @@ export class UIUXLessonBot {
         throw error; // Re-throw to prevent sending unsaved lesson
       }
       
+      // Track blocked users to handle them appropriately
+      const blockedUsers: number[] = [];
+      
       // Send to all subscribers
       for (const subscriber of subscribers) {
         try {
@@ -278,80 +233,54 @@ export class UIUXLessonBot {
           await sendLessonToRecipient(
             { bot: this.bot, chatId: subscriber.id },
             lessonData,
-            imageUrl || undefined
+            imageUrl
           );
           
-          // Track the lesson delivery
-          await lessonRepository.trackLessonDelivery(subscriber.id, lessonData.id);
+          // Track the lesson delivery with 'scheduled' as the source
+          await lessonRepository.trackLessonDelivery(subscriber.id, lessonData.id, 'scheduled');
           
           // Update subscriber stats
           await incrementLessonCount(subscriber.id);
           
-          // Generate and send a quiz after a short delay
-          setTimeout(async () => {
-            try {
-              // Generate quiz for the lesson
-              const quizData = await claudeClient.generateQuiz(lessonSections.theme);
-              
-              if (!quizData || !quizData.question) {
-                logger.error(`Failed to generate quiz for theme: ${lessonSections.theme}`);
-                return;
-              }
-              
-              // Use the utility function to send a consistently formatted quiz
-              // Note: We've updated the quiz explanation formatting to stay within Telegram's
-              // character limits for poll explanations to prevent "message is too long" errors
-              await sendFormattedQuizWithBot(this.bot, subscriber.id, quizData, lessonSections.theme);
-              
-            } catch (quizError) {
-              logger.error(`Error sending quiz to subscriber ${subscriber.id}: ${quizError instanceof Error ? quizError.message : String(quizError)}`);
-              
-              // Check if this is a "chat not found" error, which means the user is no longer reachable
-              if (quizError instanceof GrammyError && 
-                  quizError.description.includes("chat not found")) {
-                logger.info(`Removing unreachable subscriber ${subscriber.id} (chat not found)`);
-                try {
-                  // Remove the subscriber from the database
-                  await deleteSubscriber(subscriber.id);
-                  logger.info(`Successfully removed unreachable subscriber ${subscriber.id}`);
-                } catch (deleteError) {
-                  logger.error(`Failed to remove unreachable subscriber ${subscriber.id}: ${deleteError instanceof Error ? deleteError.message : String(deleteError)}`);
-                }
-              }
-            }
-          }, 10000); // 10 second delay before quiz
-          
+          logger.info(`Successfully sent lesson to subscriber ${subscriber.id}`);
         } catch (error) {
-          logger.error(`Error sending scheduled lesson to subscriber ${subscriber.id}: ${error instanceof Error ? error.message : String(error)}`);
+          // Check if the error is because the user blocked the bot
+          const isBlockedError = 
+            error instanceof Error && 
+            error.message.includes('403: Forbidden: bot was blocked by the user');
           
-          // Check if this is a "chat not found" error, which means the user is no longer reachable
-          if (error instanceof GrammyError && 
-              error.description.includes("chat not found")) {
-            logger.info(`Removing unreachable subscriber ${subscriber.id} (chat not found)`);
+          if (isBlockedError) {
+            logger.warn(`User ${subscriber.id} has blocked the bot, marking for follow-up`);
+            blockedUsers.push(subscriber.id);
+            
+            // We might want to mark these users as inactive or handle them differently
             try {
-              // Remove the subscriber from the database
-              await deleteSubscriber(subscriber.id);
-              logger.info(`Successfully removed unreachable subscriber ${subscriber.id}`);
-            } catch (deleteError) {
-              logger.error(`Failed to remove unreachable subscriber ${subscriber.id}: ${deleteError instanceof Error ? deleteError.message : String(deleteError)}`);
+              // Here we could update their status in the database
+              // await markSubscriberInactive(subscriber.id);
+              logger.info(`User ${subscriber.id} might need to be marked as inactive due to blocking the bot`);
+            } catch (statusError) {
+              logger.error(`Failed to update status for blocked user ${subscriber.id}: ${statusError instanceof Error ? statusError.message : String(statusError)}`);
             }
+          } else {
+            logger.error(`Error sending lesson to subscriber ${subscriber.id}: ${error instanceof Error ? error.message : String(error)}`);
           }
+          // Continue with other subscribers
         }
       }
       
-      // Update health status with delivery count
-      const healthStatus = await getHealthStatus();
-      if (healthStatus) {
-        await updateHealthStatus({
-          ...healthStatus,
-          totalLessonsDelivered: (healthStatus.totalLessonsDelivered || 0) + subscribers.length,
-        });
+      // Log summary of blocked users
+      if (blockedUsers.length > 0) {
+        logger.warn(`${blockedUsers.length} users have blocked the bot: ${blockedUsers.join(', ')}`);
       }
       
-      logger.info(`Scheduled lesson sent to ${subscribers.length} subscribers`);
+      // Update system health status
+      await simpleUpdateHealthStatus('lesson_delivery', true);
       
+      logger.info('Scheduled lesson delivery completed successfully');
     } catch (error) {
-      logger.error(`Error sending scheduled lesson: ${error instanceof Error ? error.message : String(error)}`);
+      logger.error(`Error in scheduled lesson delivery: ${error instanceof Error ? error.message : String(error)}`);
+      // Update health status with error
+      await simpleUpdateHealthStatus('lesson_delivery', false, error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -478,8 +407,44 @@ export async function startBot(): Promise<void> {
  */
 async function generateAndSendLesson(recipientId: number, themesToAvoid: string[] = [], quizzesToAvoid: string[] = []): Promise<void> {
   try {
-    // Generate lesson using Claude
-    const lessonResponse = await claudeClient.generateLesson(themesToAvoid, quizzesToAvoid);
+    // First try to get a lesson from the on-demand pool
+    logger.info('Trying to get lesson from on-demand pool');
+    let lessonData = await batchProcessor.getAvailableLessonFromPool('on-demand');
+    let lessonResponse;
+    
+    if (lessonData) {
+      logger.info(`Using lesson from on-demand pool: ${lessonData.id}`);
+      
+      // Mark the lesson as used
+      await batchProcessor.markLessonAsUsed(lessonData.id);
+      
+      // Format in the same structure as lessonResponse for consistency with the rest of the function
+      lessonResponse = {
+        title: lessonData.title,
+        theme: lessonData.theme,
+        contentPoints: lessonData.content.split('\n\n').filter((p: string) => p.trim() !== ''),
+        quizQuestion: lessonData.quizQuestion,
+        quizOptions: lessonData.quizOptions,
+        correctOptionIndex: lessonData.quizCorrectIndex,
+        explanation: lessonData.explanation,
+        optionExplanations: lessonData.optionExplanations || [],
+        vocabulary: lessonData.hasVocabulary && lessonData.vocabulary ? 
+          lessonData.vocabulary.split('\n\n').map((v: string) => {
+            const parts = v.split(':');
+            return { 
+              term: parts[0]?.replace(/<b>|<\/b>/g, '').trim() || '',
+              definition: parts[1]?.split('<i>Example:</i>')[0]?.trim() || '',
+              example: parts[1]?.split('<i>Example:</i>')[1]?.trim() || ''
+            };
+          }) : [],
+        example_link: lessonData.example_link,
+        videoQuery: lessonData.videoQuery
+      };
+    } else {
+      // If no lesson available in pool, generate one with Claude
+      logger.info('No lesson available in on-demand pool, generating one with Claude');
+      lessonResponse = await claudeClient.generateLesson(themesToAvoid, quizzesToAvoid);
+    }
     
     // Validate lessonSections contains required data
     if (!lessonResponse || !lessonResponse.contentPoints || !Array.isArray(lessonResponse.contentPoints)) {
@@ -508,7 +473,7 @@ async function generateAndSendLesson(recipientId: number, themesToAvoid: string[
     });
     
     // Ensure vocabulary has required fields
-    const vocabulary = (lessonResponse.vocabulary || []).map(item => {
+    const vocabulary = (lessonResponse.vocabulary || []).map((item: any) => {
       if (!item || typeof item !== 'object') {
         return {
           term: "UI/UX Term",
@@ -526,8 +491,8 @@ async function generateAndSendLesson(recipientId: number, themesToAvoid: string[
     const formattedVocabulary = utils.formatVocabulary(vocabulary);
     
     // Format and send the lesson
-    const lessonData: LessonData = {
-      id: `lesson-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    const newLessonData: LessonData = {
+      id: lessonData ? lessonData.id : `lesson-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       title: lessonResponse.title,
       theme: lessonResponse.theme,
       content: formattedContent,
@@ -543,16 +508,20 @@ async function generateAndSendLesson(recipientId: number, themesToAvoid: string[
       videoQuery: lessonResponse.videoQuery
     };
     
-    // Save lesson to database before sending
-    try {
-      const savedLesson = await lessonRepository.saveLesson(lessonData);
-      logger.info(`Successfully saved lesson with ID ${savedLesson.id} before sending to recipient ${recipientId}`);
-    } catch (error) {
-      logger.error(`Failed to save lesson to database before sending to recipient ${recipientId}: ${error instanceof Error ? error.message : String(error)}`);
-      throw error; // Re-throw to prevent sending unsaved lesson
+    // Only save to database if this is a newly generated lesson (not from pool)
+    if (!lessonData) {
+      try {
+        const savedLesson = await lessonRepository.saveLesson(newLessonData);
+        logger.info(`Successfully saved lesson with ID ${savedLesson.id} before sending to recipient ${recipientId}`);
+        // Check if the pool needs refilling and schedule it if needed
+        await batchProcessor.checkAndRefillPoolIfNeeded('on-demand');
+      } catch (error) {
+        logger.error(`Failed to save lesson to database before sending to recipient ${recipientId}: ${error instanceof Error ? error.message : String(error)}`);
+        throw error; // Re-throw to prevent sending unsaved lesson
+      }
     }
     
-    await sendLessonToRecipient({ bot, chatId: recipientId }, lessonData, imageUrl);
+    await sendLessonToRecipient({ bot, chatId: recipientId }, newLessonData, imageUrl);
     
     // Update lesson count
     await incrementLessonCount(recipientId);

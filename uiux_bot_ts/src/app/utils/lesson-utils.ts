@@ -9,6 +9,7 @@ import * as imageManager from '../api/image-manager';
 import * as youtubeClient from '../api/youtube-client';
 import { sendQuiz } from '../bot/handlers/quiz-handlers';
 import { sanitizeHtmlForTelegram } from './telegram-utils';
+import batchProcessor from '../api/batch-processor';
 
 const logger = getChildLogger('lesson-utils');
 
@@ -29,11 +30,23 @@ export async function sendLesson(ctx: BotContext, userId: number): Promise<void>
       return;
     }
     
-    // If no lesson found, generate a new one
-    const lesson = await generateNewLesson();
+    // First try to get a lesson from the on-demand pool
+    logger.info('Trying to get lesson from on-demand pool');
+    let lesson = await batchProcessor.getAvailableLessonFromPool('on-demand');
+    
+    if (lesson) {
+      logger.info(`Using lesson from on-demand pool: ${lesson.id}`);
+      
+      // Mark the lesson as used
+      await batchProcessor.markLessonAsUsed(lesson.id);
+    } else {
+      // If no lesson found in the pool, generate a new one
+      logger.warn('No lesson available in on-demand pool, generating one dynamically');
+      lesson = await generateNewLesson();
+    }
     
     if (!lesson) {
-      logger.error('Failed to generate new lesson');
+      logger.error('Failed to get or generate a lesson');
       await ctx.reply("❌ Sorry, I couldn't generate a lesson right now. Please try again later.");
       return;
     }
@@ -76,7 +89,7 @@ export async function sendLesson(ctx: BotContext, userId: number): Promise<void>
  */
 async function generateNewLesson(): Promise<LessonData | null> {
   try {
-    logger.info('Generating new lesson');
+    logger.info('Generating lesson content with Claude API');
     
     // Get recent themes from the last month
     const recentThemes = await lessonRepository.getRecentThemes();
@@ -109,13 +122,20 @@ async function generateNewLesson(): Promise<LessonData | null> {
       explanation: lessonSections.explanation,
       optionExplanations: lessonSections.optionExplanations,
       example_link: lessonSections.example_link,
-      videoQuery: lessonSections.videoQuery
+      videoQuery: lessonSections.videoQuery,
+      pool_type: 'on-demand',
+      is_used: true,
+      used_at: new Date().toISOString()
     };
     
     // Save to database
     try {
       const savedLesson = await lessonRepository.saveLesson(lesson);
       logger.info(`Successfully saved lesson with ID ${lesson.id}`);
+      
+      // Check if the pool needs refilling and schedule it if needed
+      await batchProcessor.checkAndRefillPoolIfNeeded('on-demand');
+      
       return savedLesson;
     } catch (error) {
       logger.error(`Failed to save lesson to database: ${error instanceof Error ? error.message : String(error)}`);
@@ -123,7 +143,7 @@ async function generateNewLesson(): Promise<LessonData | null> {
     }
   } catch (error) {
     logger.error(`Error generating new lesson: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
+    throw error;
   }
 }
 
@@ -426,5 +446,61 @@ async function sendVideoWithFallbacks(
   }
 }
 
-// Export other utility functions as needed
-export { generateNewLesson, sendLessonContent, sendLessonToRecipient }; 
+/**
+ * Send a scheduled lesson to all subscribers
+ */
+async function getScheduledLesson(): Promise<LessonData | null> {
+  try {
+    logger.info('Getting scheduled lesson');
+    
+    // Try to get a lesson from the scheduled pool
+    logger.info('Trying to get lesson from scheduled pool');
+    const poolLesson = await batchProcessor.getAvailableLessonFromPool('scheduled');
+    
+    if (poolLesson) {
+      logger.info(`Using lesson from scheduled pool: ${poolLesson.id}`);
+      
+      // Mark the lesson as used
+      await batchProcessor.markLessonAsUsed(poolLesson.id);
+      
+      return poolLesson;
+    }
+    
+    // If no lesson available in pool, fall back to on-demand generation
+    // This should be rare if the pool system is working properly
+    logger.warn('No lesson available in scheduled pool, trying on-demand pool');
+    
+    // Try on-demand pool as a fallback
+    const onDemandLesson = await batchProcessor.getAvailableLessonFromPool('on-demand');
+    
+    if (onDemandLesson) {
+      logger.info(`Using lesson from on-demand pool as fallback: ${onDemandLesson.id}`);
+      
+      // Mark the lesson as used
+      await batchProcessor.markLessonAsUsed(onDemandLesson.id);
+      
+      return onDemandLesson;
+    }
+    
+    // If still no lesson, fall back to dynamic generation
+    logger.warn('No lesson available in any pool, generating one dynamically');
+    const newLesson = await generateNewLesson();
+    
+    // If we've dynamically generated a lesson, make sure it works with the scheduled pool
+    if (newLesson && newLesson.pool_type !== 'scheduled') {
+      newLesson.pool_type = 'scheduled';
+      await lessonRepository.saveLesson(newLesson);
+    }
+    
+    return newLesson;
+  } catch (error) {
+    logger.error(`Error getting scheduled lesson: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+// Export utility functions that aren't already exported individually
+export {
+  sendLessonToRecipient,
+  getScheduledLesson
+} 

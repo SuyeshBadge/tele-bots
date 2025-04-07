@@ -83,14 +83,14 @@ export class Scheduler {
     
     // For development mode, schedule a test lesson soon
     if (IS_DEV_MODE && !DISABLE_DEV_SCHEDULED_LESSONS) {
-      logger.info('Development mode detected, scheduling test lesson in 10 seconds');
+      logger.info('Development mode detected, scheduling test lesson in 100 seconds');
       setTimeout(async () => {
         try {
           await this.lessonCallback();
         } catch (error) {
           logger.error(`Error running test lesson: ${error instanceof Error ? error.message : String(error)}`);
         }
-      }, 1000);
+      }, 100000);
     }
   }
 

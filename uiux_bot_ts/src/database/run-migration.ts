@@ -1,22 +1,28 @@
-import { getSupabaseClient } from './supabase-client';
-import { logger } from '../app/utils/logger';
-import * as fs from 'fs';
-import * as path from 'path';
+/**
+ * Database Migration Utility
+ * 
+ * Script to run all database migrations.
+ */
 
-async function runMigration() {
+import { runAllMigrations, runMigration } from './migrator';
+import { getChildLogger } from '../app/utils/logger';
+
+// Configure logger
+const logger = getChildLogger('db-migration');
+
+// Parse command-line arguments
+const [,,migrationName] = process.argv;
+
+async function main(): Promise<void> {
   try {
-    const supabase = getSupabaseClient();
-    const migrationPath = path.join(__dirname, 'migrations', '001_add_lesson_columns.sql');
-    
-    // Read the migration SQL
-    const migrationSql = fs.readFileSync(migrationPath, 'utf-8');
-    
-    // Execute the migration
-    const { error } = await supabase.rpc('exec_sql', { sql: migrationSql });
-    
-    if (error) {
-      logger.error(`Migration failed: ${error.message}`);
-      process.exit(1);
+    if (migrationName) {
+      // Run a specific migration
+      logger.info(`Running specific migration: ${migrationName}`);
+      await runMigration(migrationName);
+    } else {
+      // Run all migrations
+      logger.info('Running all migrations');
+      await runAllMigrations();
     }
     
     logger.info('Migration completed successfully');
@@ -27,4 +33,8 @@ async function runMigration() {
   }
 }
 
-runMigration(); 
+// Run the migrations
+main().catch(error => {
+  logger.error(`Uncaught error: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}); 

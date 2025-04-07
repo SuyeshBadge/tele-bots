@@ -25,6 +25,8 @@ import { ensureDataInSupabase } from './app/utils/supabase-migration';
 import { initPersistence } from './app/utils/persistence';
 import { initSupabaseSchema } from './app/utils/supabase';
 import { healthServer } from './app/api/health-server';
+import { initializePools } from './app/utils/lesson-pool-utils';
+import batchMonitor from './app/api/batch-monitor';
 
 // Load environment variables
 dotenv.config({ path: path.resolve(process.cwd(), '.env') });
@@ -118,6 +120,13 @@ async function main(): Promise<void> {
     await initPersistence();
     logger.info('Persistence layer initialized');
     
+    // Initialize batch monitoring system to track running batches
+    await batchMonitor.initBatchMonitor();
+    logger.info('Batch monitoring system initialized');
+    
+    // Initialize batch processing for lessons
+    await initializePools();
+    
     // Start the health server
     bot = new UIUXLessonBot();
     startHealthServer(bot);
@@ -156,6 +165,10 @@ function setupSignalHandlers(bot: UIUXLessonBot): void {
       try {
         // Set health status to false during shutdown
         healthServer.setHealthy(false);
+        
+        // Stop batch monitoring
+        batchMonitor.stopMonitoring();
+        logger.info('Batch monitoring stopped');
         
         // Set a timeout to force exit if shutdown takes too long
         const forceExitTimeout = setTimeout(() => {

@@ -613,4 +613,44 @@ export async function getSentVideoIds(userId: number): Promise<string[]> {
     logSupabaseError(`getSentVideoIds for user ${userId}`, error);
     return [];
   }
+}
+
+/**
+ * A simpler version of updateHealthStatus that updates specific status field
+ * @param component The component that is reporting status
+ * @param isHealthy Whether the component is healthy
+ * @param errorMessage Optional error message
+ */
+export async function simpleUpdateHealthStatus(
+  component: string,
+  isHealthy: boolean = true,
+  errorMessage?: string
+): Promise<void> {
+  try {
+    // Get current health status
+    const currentHealth = await getHealthStatus();
+    
+    if (!currentHealth) {
+      logger.error(`Could not get current health status to update ${component}`);
+      return;
+    }
+    
+    // Update the health status
+    const updatedHealth: HealthStatus = {
+      ...currentHealth,
+      lastCheckTime: new Date().toISOString(),
+      isHealthy: isHealthy
+    };
+    
+    // Add error details if provided and there's an error
+    if (!isHealthy && errorMessage) {
+      updatedHealth.lastError = errorMessage;
+      updatedHealth.lastErrorTime = new Date().toISOString();
+    }
+    
+    // Save the updated health status
+    await updateHealthStatus(updatedHealth);
+  } catch (error) {
+    logSupabaseError(`simpleUpdateHealthStatus for ${component}`, error);
+  }
 } 

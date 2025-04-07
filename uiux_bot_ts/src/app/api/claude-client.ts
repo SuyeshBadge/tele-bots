@@ -8,6 +8,7 @@ import { settings, UI_UX_THEMES } from '../config/settings';
 import fs from 'fs';
 import path from 'path';
 import { jsonrepair } from 'jsonrepair';
+import { lessonRepository } from '../utils/lesson-repository';
 
 // Configure logger
 const logger = getChildLogger('claude');
@@ -173,6 +174,7 @@ function extractJsonFromResponse(content: string): string {
  */
 async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoid: string[] = []): Promise<LessonData> {
   let retryCount = 0;
+  logger.info(`Generating lesson content with Claude API`);
   
   while (retryCount < maxRetries) {
     let theme = '';
@@ -408,8 +410,8 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       `;
       
       
-      logger.info(`LESSON SYSTEM PROMPT: ${systemMessage}`);
-      logger.info(`LESSON USER PROMPT: ${prompt}`);
+      // logger.info(`LESSON SYSTEM PROMPT: ${systemMessage}`);
+      // logger.info(`LESSON USER PROMPT: ${prompt}`);
       
       const response = await claude.messages.create({
         model: settings.CLAUDE_MODEL,
@@ -425,55 +427,83 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       });
       
       // Extract and parse the content
-      const content = response.content[0].text;
-      if (!content) {
-        throw new Error('No content returned from Claude');
-      }
-      
-      // Enhanced logging
-      const usage = response.usage;
-      const promptTokens = usage?.input_tokens;
-      const completionTokens = usage?.output_tokens;
-      const totalTokens = usage?.input_tokens + usage?.output_tokens;
-      
-      logger.info(`Claude response received - Tokens: ${completionTokens}/${promptTokens}/${totalTokens}`);
-      
-      // Log request details and response to the specialized Claude logger
-      claudeLogger.info(`LESSON REQUEST - Model: ${settings.CLAUDE_MODEL}, Tokens: ${totalTokens}`);
-      claudeLogger.info(`LESSON RESPONSE - Raw`, { response: content });
-      logger.debug(`LESSON RESPONSE - Raw: ${content}`);
-      
-      try {
-        // Extract JSON from the response
-        const extractedJson = extractJsonFromResponse(content);
+      const contentBlock = response.content[0];
+      // Check if the content block has a text property
+      if ('text' in contentBlock) {
+        const content = contentBlock.text;
+        if (!content) {
+          throw new Error('No content returned from Claude');
+        }
         
-        // Use jsonrepair to fix any JSON formatting issues
-        const repairedJson = jsonrepair(extractedJson);
+        // Enhanced logging
+        const usage = response.usage;
+        const promptTokens = usage?.input_tokens;
+        const completionTokens = usage?.output_tokens;
+        const totalTokens = usage?.input_tokens + usage?.output_tokens;
         
-        // Parse the repaired JSON
-        let lessonData = JSON.parse(repairedJson) as LessonData;
+        logger.info(`Claude response received - Tokens: ${completionTokens}/${promptTokens}/${totalTokens}`);
         
-        // Validate and fix the lesson data
-        lessonData = validateAndFixLessonData(lessonData);
+        // Log request details and response to the specialized Claude logger
+        claudeLogger.info(`LESSON REQUEST - Model: ${settings.CLAUDE_MODEL}, Tokens: ${totalTokens}`);
+        claudeLogger.info(`LESSON RESPONSE - Raw`, { response: content });
+        logger.debug(`LESSON RESPONSE - Raw: ${content}`);
         
-        theme = lessonData.theme;
+        try {
+          // Extract JSON from the response
+          const extractedJson = extractJsonFromResponse(content);
+          
+          // Use jsonrepair to fix any JSON formatting issues
+          const repairedJson = jsonrepair(extractedJson);
+          
+          // Parse the repaired JSON
+          let parsedData = JSON.parse(repairedJson);
+          
+          // Handle both single lesson and batched lesson formats (for compatibility)
+          let lessonData;
+          if (parsedData.lessons && Array.isArray(parsedData.lessons) && parsedData.lessons.length > 0) {
+            // If "lessons" array exists, take the first lesson
+            lessonData = parsedData.lessons[0];
+          } else {
+            // Otherwise, assume it's a single lesson format
+            lessonData = parsedData;
+          }
+          
+          // Validate and fix the lesson data
+          lessonData = validateAndFixLessonData(lessonData);
+          
+          theme = lessonData.theme;
+          
+          // Add to cache
+          _lessonCache[theme.toLowerCase().trim()] = {
+            timestamp: Date.now(),
+            content: lessonData
+          };
+          
+          return lessonData;
+        } catch (parseError) {
+          logger.error(`Error parsing JSON response with jsonrepair: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+          logger.error(`Raw content: ${content}`);
+          
+          // Try again with a different approach or fail
+          retryCount++;
+          if (retryCount >= maxRetries) {
+            logger.warn(`Maximum retries reached, using fallback lesson for theme: ${theme}`);
+            throw new Error(`Failed to generate lesson: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+          }
+          
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      } else {
+        // Handle case where content block is not text (e.g., tool use)
+        logger.error('Received unexpected content type from Claude (not text)');
+        logger.debug(`Content block type: ${contentBlock.type}`);
         
-        // Add to cache
-        _lessonCache[theme.toLowerCase().trim()] = {
-          timestamp: Date.now(),
-          content: lessonData
-        };
-        
-        return lessonData;
-      } catch (parseError) {
-        logger.error(`Error parsing JSON response with jsonrepair: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
-        logger.error(`Raw content: ${content}`);
-        
-        // Try again with a different approach or fail
+        // Try again with a different approach
         retryCount++;
         if (retryCount >= maxRetries) {
           logger.warn(`Maximum retries reached, using fallback lesson for theme: ${theme}`);
-          throw new Error(`Failed to generate lesson: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+          throw new Error('Failed to generate lesson: Received non-text content from Claude');
         }
         
         // Wait before retrying
@@ -631,17 +661,143 @@ export async function generateQuiz(theme?: string): Promise<QuizData> {
       }
     }
     
-    // If no cached quiz, generate lesson content which includes quiz data
-    const lessonData = await generateLessonContent();
+    // Try to get a quiz from a pool lesson
+    try {
+      // Import batchProcessor dynamically to avoid circular dependencies
+      const batchProcessor = await import('../api/batch-processor').then(m => m.default);
+      
+      // Try to find a lesson in the pools that we can extract a quiz from
+      logger.info(`Looking for a pool lesson with quiz for theme: ${quizTheme}`);
+      
+      // First try scheduled pool
+      let poolLesson = await batchProcessor.getAvailableLessonFromPool('scheduled');
+      
+      // If not found in scheduled, try on-demand pool
+      if (!poolLesson) {
+        poolLesson = await batchProcessor.getAvailableLessonFromPool('on-demand');
+      }
+      
+      // If we found a lesson in a pool, extract its quiz data
+      if (poolLesson && poolLesson.quizQuestion && poolLesson.quizOptions) {
+        logger.info(`Found pool lesson with quiz data: ${poolLesson.id}`);
+        
+        // Note: We don't mark the lesson as used since we're just extracting its quiz
+        // This allows the lesson to still be used for delivering content
+        
+        // Create quiz from pool lesson
+        const correctIndex = typeof poolLesson.quizCorrectIndex === 'number' ? poolLesson.quizCorrectIndex : 0;
+        const quizData: QuizData = {
+          question: poolLesson.quizQuestion,
+          options: poolLesson.quizOptions,
+          correctIndex: correctIndex,
+          explanation: poolLesson.explanation,
+          option_explanations: poolLesson.optionExplanations || 
+            generateDefaultExplanations(
+              poolLesson.quizOptions, 
+              correctIndex, 
+              quizTheme
+            )
+        };
+        
+        // Cache the quiz
+        _quizCache[themeLower] = {
+          timestamp: Date.now(),
+          content: quizData
+        };
+        
+        return quizData;
+      }
+    } catch (poolError) {
+      logger.warn(`Error trying to get quiz from pool: ${poolError instanceof Error ? poolError.message : String(poolError)}`);
+      // Continue to next option if pool access fails
+    }
     
-    return {
-      question: lessonData.quiz_question,
-      options: lessonData.quiz_options,
-      correctIndex: lessonData.correct_option_index,
-      explanation: lessonData.explanation,
-      option_explanations: lessonData.option_explanations || 
-        generateDefaultExplanations(lessonData.quiz_options, lessonData.correct_option_index, quizTheme)
+    // If not found in pools, try to get a quiz from recently delivered lessons
+    try {
+      logger.info(`Looking for a quiz from past lessons for theme: ${quizTheme}`);
+      
+      // Get recent quiz lessons directly from the database without calling getRecentLessons
+      const supabase = await import('../../database/supabase-client').then(m => m.getSupabaseClient);
+      const { data, error } = await supabase()
+        .from('lessons')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10);
+      
+      if (error) {
+        throw new Error(`Error getting recent lessons: ${error.message}`);
+      }
+      
+      if (data && data.length > 0) {
+        // Find a lesson with quiz data that we can use
+        const lessonWithQuiz = data.find(lesson => 
+          lesson.quiz_question && 
+          lesson.quiz_options && 
+          lesson.quiz_options.length > 0 &&
+          typeof lesson.quiz_correct_index === 'number'
+        );
+        
+        if (lessonWithQuiz) {
+          logger.info(`Using quiz from past lesson: ${lessonWithQuiz.id}`);
+          
+          // Create quiz from past lesson
+          const correctIndex = typeof lessonWithQuiz.quiz_correct_index === 'number' ? lessonWithQuiz.quiz_correct_index : 0;
+          const quizData: QuizData = {
+            question: lessonWithQuiz.quiz_question,
+            options: lessonWithQuiz.quiz_options,
+            correctIndex: correctIndex,
+            explanation: lessonWithQuiz.explanation,
+            option_explanations: lessonWithQuiz.option_explanations || 
+              generateDefaultExplanations(
+                lessonWithQuiz.quiz_options, 
+                correctIndex, 
+                quizTheme
+              )
+          };
+          
+          // Cache the quiz
+          _quizCache[themeLower] = {
+            timestamp: Date.now(),
+            content: quizData
+          };
+          
+          return quizData;
+        }
+      }
+    } catch (dbError) {
+      logger.warn(`Error trying to get quiz from past lessons: ${dbError instanceof Error ? dbError.message : String(dbError)}`);
+      // Continue to fallback if database access fails
+    }
+    
+    // As a last resort, use the fallback quiz instead of calling Claude API
+    logger.info(`No suitable quiz found, using fallback quiz for theme: ${quizTheme}`);
+    
+    // Fallback quiz
+    const fallbackOptions = [
+      "Making designs as complex as possible",
+      "Using user feedback to improve designs",
+      "Ignoring accessibility concerns",
+      "Following the latest design trends"
+    ];
+    const fallbackCorrectIndex = 1;
+    const fallbackExplanation = `Using user feedback is essential when implementing any UI/UX design principle related to ${quizTheme}.`;
+    
+    const fallbackQuiz = {
+      question: `What is a key principle of good UI/UX design related to ${quizTheme}?`,
+      options: fallbackOptions,
+      correctIndex: fallbackCorrectIndex,
+      explanation: fallbackExplanation,
+      option_explanations: generateDefaultExplanations(fallbackOptions, fallbackCorrectIndex, quizTheme)
     };
+    
+    // Cache the fallback quiz to avoid future lookups
+    _quizCache[themeLower] = {
+      timestamp: Date.now(),
+      content: fallbackQuiz
+    };
+    
+    return fallbackQuiz;
+    
   } catch (error) {
     logger.error(`Error generating quiz: ${error instanceof Error ? error.message : String(error)}`);
     

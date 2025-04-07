@@ -5,6 +5,8 @@ import { getAllSubscribers, getSubscriber, updateSubscriber } from '../../utils/
 import { getHealthStatus } from '../../utils/persistence';
 import { settings } from '../../config/settings';
 import { NextFunction } from 'grammy';
+import batchProcessor from '../../api/batch-processor';
+import batchMonitor from '../../api/batch-monitor';
 
 const logger = getChildLogger('admin-handlers');
 
@@ -268,4 +270,105 @@ function getUptimeString(startupTime: string): string {
   const minutes = Math.floor((uptimeMs % (1000 * 60 * 60)) / (1000 * 60));
   
   return `${days}d ${hours}h ${minutes}m`;
+}
+
+/**
+ * Batch status command - shows status of batch jobs
+ */
+export async function batchStatusCommand(ctx: BotContext): Promise<void> {
+  try {
+    const userId = ctx.from?.id;
+    
+    if (!userId || !isAdmin(userId)) {
+      await ctx.reply('You are not authorized to use this command.');
+      return;
+    }
+    
+    // Get batch stats 
+    const batchStats = await batchProcessor.getBatchStats();
+    
+    if (!batchStats) {
+      await ctx.reply('Error retrieving batch stats. Check logs for details.');
+      return;
+    }
+    
+    // Format the stats message
+    let message = '📊 *Batch Jobs Status*\n\n';
+    
+    // Total count
+    message += `📝 *Total Jobs*: ${batchStats.total}\n\n`;
+    
+    // Status counts
+    message += '🔢 *Jobs by Status*:\n';
+    for (const statusCount of batchStats.counts) {
+      const emoji = getStatusEmoji(statusCount.status);
+      message += `${emoji} ${statusCount.status}: ${statusCount.count}\n`;
+    }
+    
+    // Recent jobs
+    if (batchStats.recent && batchStats.recent.length > 0) {
+      message += '\n🕒 *Recent Jobs*:\n';
+      
+      for (const job of batchStats.recent.slice(0, 5)) {
+        const emoji = getStatusEmoji(job.status);
+        const date = new Date(job.started_at).toLocaleString();
+        message += `${emoji} ${job.id} (${job.pool_type}) - ${job.status} - ${date}\n`;
+      }
+    } else {
+      message += '\nNo recent jobs found.';
+    }
+    
+    await ctx.reply(message, { parse_mode: 'Markdown' });
+    
+    logger.info(`Batch status information sent to user: ${userId}`);
+  } catch (error) {
+    logger.error(`Error in batchStatusCommand:`, error);
+    await ctx.reply('Sorry, there was an error processing your request. Please try again later.');
+  }
+}
+
+/**
+ * Get an emoji for a batch job status
+ * @param status - The batch job status
+ * @returns An emoji representing the status
+ */
+function getStatusEmoji(status: string): string {
+  switch (status) {
+    case 'created':
+      return '📝';
+    case 'processing':
+      return '⚙️';
+    case 'completed':
+      return '✅';
+    case 'failed':
+      return '❌';
+    default:
+      return '❓';
+  }
+}
+
+/**
+ * Command to manually check the status of running batches
+ */
+export async function checkBatchesCommand(ctx: BotContext): Promise<void> {
+  try {
+    const userId = ctx.from?.id;
+    
+    if (!userId || !isAdmin(userId)) {
+      await ctx.reply('You are not authorized to use this command.');
+      return;
+    }
+    
+    await ctx.reply('Checking running batches... This may take a moment.');
+    
+    // Force check of running batches
+    const result = await batchMonitor.forceCheckRunningBatches();
+    
+    await ctx.reply(result, { parse_mode: 'Markdown' });
+    
+    logger.info(`Manual batch check requested by user ${userId}`);
+  } catch (error) {
+    logger.error(`Error in checkBatchesCommand:`, error);
+    await ctx.reply('Sorry, there was an error processing your request. Please try again later.');
+  }
 } 
