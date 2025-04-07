@@ -16,7 +16,7 @@ import { batchApiRateLimiter, getExponentialBackoffDelay, sleep } from '../utils
 const logger = getChildLogger('batch-monitor');
 
 // Monitoring interval in milliseconds (5 minutes)
-const MONITOR_INTERVAL = 5 * 60 * 1000;
+const MONITOR_INTERVAL = 0.15 * 60 * 1000;
 
 // Maximum number of consecutive errors before giving up on a batch
 const MAX_ERRORS = 3;

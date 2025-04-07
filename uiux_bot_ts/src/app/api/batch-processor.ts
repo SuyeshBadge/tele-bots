@@ -704,9 +704,24 @@ function formatVocabulary(vocabularyTerms: Array<{term: string, definition: stri
     return "";
   }
   
-  return vocabularyTerms.map(item => {
-    return `${item.term}: ${item.definition} Example: ${item.example}`;
-  }).join('\n\n');
+  // Format vocabulary terms with proper HTML for Telegram
+  return '<b>📚 Key Vocabulary</b>\n\n' + 
+    vocabularyTerms
+      .filter(item => item && item.term && item.definition)
+      .map(item => {
+        // Ensure proper formatting with bold terms and italicized examples
+        const term = item.term.trim();
+        const definition = item.definition.trim();
+        const example = item.example ? item.example.trim() : '';
+        
+        let formatted = `<b>${term}</b>: ${definition}`;
+        if (example) {
+          formatted += `\n<i>Example:</i> ${example}`;
+        }
+        
+        return formatted;
+      })
+      .join('\n\n');
 }
 
 /**

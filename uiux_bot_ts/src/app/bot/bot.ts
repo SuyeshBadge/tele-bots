@@ -429,14 +429,37 @@ async function generateAndSendLesson(recipientId: number, themesToAvoid: string[
         explanation: lessonData.explanation,
         optionExplanations: lessonData.optionExplanations || [],
         vocabulary: lessonData.hasVocabulary && lessonData.vocabulary ? 
-          lessonData.vocabulary.split('\n\n').map((v: string) => {
-            const parts = v.split(':');
-            return { 
-              term: parts[0]?.replace(/<b>|<\/b>/g, '').trim() || '',
-              definition: parts[1]?.split('<i>Example:</i>')[0]?.trim() || '',
-              example: parts[1]?.split('<i>Example:</i>')[1]?.trim() || ''
-            };
-          }) : [],
+          // Parse the formatted vocabulary HTML back into objects
+          lessonData.vocabulary
+            .replace('<b>📚 Key Vocabulary</b>\n\n', '')  // Remove the header
+            .split('\n\n')
+            .filter(entry => entry.trim() !== '')
+            .map(entry => {
+              // Extract term (which is inside <b> tags)
+              const termMatch = entry.match(/<b>(.*?)<\/b>/);
+              const term = termMatch ? termMatch[1].trim() : '';
+              
+              // Extract definition (between : and Example or end)
+              let def = '';
+              let example = '';
+              
+              if (entry.includes('<i>Example:</i>')) {
+                const parts = entry.split('<i>Example:</i>');
+                // Get definition part after the colon and before Example
+                def = parts[0].split(':')[1]?.trim() || '';
+                // Get example part
+                example = parts[1]?.trim() || '';
+              } else {
+                // No example, just get definition after colon
+                def = entry.split(':')[1]?.trim() || '';
+              }
+              
+              return { 
+                term: term,
+                definition: def,
+                example: example
+              };
+            }) : [],
         example_link: lessonData.example_link,
         videoQuery: lessonData.videoQuery
       };
