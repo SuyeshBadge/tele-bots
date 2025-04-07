@@ -33,6 +33,7 @@ import { getImageForLesson } from '../api/image-manager';
 import { LessonData } from '../utils/lesson-types';
 import { getScheduledLesson } from '../utils/lesson-pool-utils';
 import batchProcessor from '../api/batch-processor';
+import claudeClient from '../api/claude-client';
 
 // Configure logger
 const logger = getChildLogger('bot');
@@ -49,9 +50,6 @@ bot.use(session({
     quizOptions: undefined
   })
 }));
-
-// Import Claude client for lesson generation
-import claudeClient from '../api/claude-client';
 
 /**
  * Main bot class for UI/UX Lessons
@@ -241,6 +239,30 @@ export class UIUXLessonBot {
           
           // Update subscriber stats
           await incrementLessonCount(subscriber.id);
+          
+          // Send a quiz after the lesson
+          try {
+            // Use quiz data from the lesson if available
+            if (lessonData.quizQuestion && lessonData.quizOptions && lessonData.quizCorrectIndex !== undefined) {
+              const quizData = {
+                question: lessonData.quizQuestion,
+                options: lessonData.quizOptions,
+                correctIndex: lessonData.quizCorrectIndex,
+                explanation: lessonData.explanation || `The correct answer is "${lessonData.quizOptions[lessonData.quizCorrectIndex]}"`,
+                option_explanations: lessonData.optionExplanations || []
+              };
+              
+              // Send quiz to the subscriber
+              await sendFormattedQuizWithBot(this.bot, subscriber.id, quizData, lessonData.theme);
+              logger.info(`Successfully sent quiz to subscriber ${subscriber.id}`);
+            } else {
+              // If lesson doesn't have quiz data, log it but don't generate a new one
+              logger.info(`No quiz data available in lesson for subscriber ${subscriber.id}, skipping quiz`);
+            }
+          } catch (quizError) {
+            logger.error(`Error sending quiz to subscriber ${subscriber.id}: ${quizError instanceof Error ? quizError.message : String(quizError)}`);
+            // Continue with other subscribers even if quiz sending fails
+          }
           
           logger.info(`Successfully sent lesson to subscriber ${subscriber.id}`);
         } catch (error) {
