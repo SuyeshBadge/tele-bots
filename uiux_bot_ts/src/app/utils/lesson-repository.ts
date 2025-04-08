@@ -198,7 +198,7 @@ export class LessonRepository {
       
       // Log the lesson data being saved
       logger.info(`Saving lesson with ID ${lesson.id} to database`);
-      logger.debug(`Lesson data: ${JSON.stringify(dbModel, null, 2)}`);
+      logger.info(`Lesson data: ${JSON.stringify(dbModel, null, 2)}`);
       
       const { data, error } = await supabase
         .from('lessons')
@@ -561,6 +561,92 @@ export class LessonRepository {
     
     if (error?.details) {
       logger.error(`Supabase error details: ${error.details}`);
+    }
+  }
+  
+  /**
+   * Update pool statistics when a lesson is marked as used
+   * @param poolType The pool type to update statistics for
+   * @returns Boolean indicating success
+   */
+  async decrementPoolAvailableCount(poolType: PoolType): Promise<boolean> {
+    try {
+      const supabase = getSupabaseClient();
+      
+      // Get current pool stats
+      const { data: statsData, error: statsError } = await supabase
+        .from('lesson_pool_stats')
+        .select('available_lessons')
+        .eq('pool_type', poolType)
+        .single();
+      
+      if (statsError) {
+        this.logSupabaseError(`decrementPoolAvailableCount for ${poolType}`, statsError);
+        return false;
+      }
+      
+      if (!statsData) {
+        logger.info(`No pool stats found for ${poolType}, cannot decrement available count`);
+        return false;
+      }
+      
+      // Calculate new available count (never go below 0)
+      const newAvailable = Math.max(0, statsData.available_lessons - 1);
+      
+      // Update the pool stats
+      const { error: updateError } = await supabase
+        .from('lesson_pool_stats')
+        .update({
+          available_lessons: newAvailable,
+          updated_at: new Date().toISOString()
+        })
+        .eq('pool_type', poolType);
+      
+      if (updateError) {
+        this.logSupabaseError(`decrementPoolAvailableCount update for ${poolType}`, updateError);
+        return false;
+      }
+      
+      logger.info(`Successfully decremented available count for ${poolType} pool to ${newAvailable}`);
+      return true;
+    } catch (error) {
+      this.logSupabaseError(`decrementPoolAvailableCount for ${poolType}`, error);
+      return false;
+    }
+  }
+  
+  /**
+   * Mark a lesson as used and update pool statistics
+   * @param lessonId The ID of the lesson to mark as used
+   * @returns The updated lesson or null if not found
+   */
+  async markLessonAsUsedAndUpdatePool(lessonId: string): Promise<LessonData | null> {
+    try {
+      // First get the lesson to check its pool type
+      const lesson = await this.getLessonById(lessonId);
+      
+      if (!lesson) {
+        logger.warn(`Lesson with ID ${lessonId} not found for marking as used`);
+        return null;
+      }
+      
+      // Mark the lesson as used
+      const updatedLesson = await this.markLessonAsUsed(lessonId);
+      
+      if (!updatedLesson) {
+        logger.error(`Failed to mark lesson ${lessonId} as used`);
+        return null;
+      }
+      
+      // Update pool statistics if the lesson has a pool type
+      if (lesson.pool_type) {
+        await this.decrementPoolAvailableCount(lesson.pool_type);
+      }
+      
+      return updatedLesson;
+    } catch (error) {
+      this.logSupabaseError(`markLessonAsUsedAndUpdatePool for ${lessonId}`, error);
+      return null;
     }
   }
 }

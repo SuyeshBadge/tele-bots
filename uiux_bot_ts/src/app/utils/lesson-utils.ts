@@ -487,9 +487,17 @@ async function getScheduledLesson(): Promise<LessonData | null> {
     const newLesson = await generateNewLesson();
     
     // If we've dynamically generated a lesson, make sure it works with the scheduled pool
-    if (newLesson && newLesson.pool_type !== 'scheduled') {
+    if (newLesson) {
+      // Set pool type to scheduled and ensure it's marked as used
       newLesson.pool_type = 'scheduled';
+      newLesson.is_used = true;
+      newLesson.used_at = new Date().toISOString();
+      
+      // Save the updated lesson
       await lessonRepository.saveLesson(newLesson);
+      
+      // Also update pool stats since we're using this lesson
+      await lessonRepository.decrementPoolAvailableCount('scheduled');
     }
     
     return newLesson;

@@ -1023,68 +1023,38 @@ export async function refillPool(poolType: PoolType): Promise<void> {
  */
 export async function markLessonAsUsed(lessonId: string): Promise<void> {
   try {
-    const supabase = getSupabaseClient();
-    
     // Get the lesson to check its pool type
-    const { data: lesson, error: lessonError } = await supabase
-      .from('lessons')
-      .select('pool_type')
-      .eq('id', lessonId)
-      .single();
-    
-    if (lessonError) {
-      logger.error(`Error getting lesson for marking as used: ${lessonError.message}`);
-      return;
-    }
+    const lesson = await lessonRepository.getLessonById(lessonId);
     
     if (!lesson) {
       logger.warn(`Lesson ${lessonId} not found for marking as used`);
       return;
     }
-    console.log('lesson', lesson,lessonId);
     
-    // Update the lesson as used
-    const { error: updateError } = await supabase
-      .from('lessons')
-      .update({
-        is_used: true,
-        used_at: new Date().toISOString()
-      })
-      .eq('id', lessonId);
+    // Update the lesson as used using lessonRepository
+    const updatedLesson = await lessonRepository.markLessonAsUsed(lessonId);
     
-    if (updateError) {
-      logger.error(`Error marking lesson as used: ${updateError.message}`);
+    if (!updatedLesson) {
+      logger.error(`Failed to mark lesson ${lessonId} as used`);
       return;
     }
     
-    // Update the pool stats
-    const { data: statsData, error: statsError } = await supabase
-      .from('lesson_pool_stats')
-      .select('available_lessons')
-      .eq('pool_type', lesson.pool_type)
-      .single();
-    
-    if (statsError) {
-      logger.error(`Error getting pool stats for decrementing: ${statsError.message}`);
-      return;
+    // Update the pool stats if the lesson has a pool type
+    if (lesson.pool_type) {
+      await lessonRepository.decrementPoolAvailableCount(lesson.pool_type);
     }
     
-    if (statsData) {
-      const newAvailable = Math.max(0, statsData.available_lessons - 1);
-      
-      await supabase
-        .from('lesson_pool_stats')
-        .update({
-          available_lessons: newAvailable,
-          updated_at: new Date().toISOString()
-        })
-        .eq('pool_type', lesson.pool_type);
-    }
-    
-    logger.info(`Marked lesson ${lessonId} as used and updated ${lesson.pool_type} pool stats`);
+    logger.info(`Marked lesson ${lessonId} as used`);
     
     // Check if pool needs refill after using a lesson
-    await checkAndRefillPoolIfNeeded(lesson.pool_type as PoolType);
+    try {
+      if (lesson.pool_type) {
+        await checkAndRefillPoolIfNeeded(lesson.pool_type);
+      }
+    } catch (refillError) {
+      logger.error(`Error checking if pool needs refill: ${refillError instanceof Error ? refillError.message : String(refillError)}`);
+      // Don't rethrow - we've already marked the lesson as used
+    }
   } catch (error) {
     logger.error(`Error marking lesson as used: ${error instanceof Error ? error.message : String(error)}`);
   }

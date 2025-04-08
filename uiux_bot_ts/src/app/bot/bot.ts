@@ -212,13 +212,20 @@ export class UIUXLessonBot {
         // Continue without an image
       }
       
-      // Save lesson to database once before sending to any subscribers
-      try {
-        const savedLesson = await lessonRepository.saveLesson(lessonData);
-        logger.info(`Successfully saved lesson with ID ${savedLesson.id} to database`);
-      } catch (error) {
-        logger.error(`Failed to save lesson to database: ${error instanceof Error ? error.message : String(error)}`);
-        throw error; // Re-throw to prevent sending unsaved lesson
+      // Save the lesson with the image URL
+      if (lessonData.imageUrl) {
+        logger.info(`Saving lesson with ID ${lessonData.id} to database`);
+        logger.info('Lesson data:', JSON.stringify(lessonData, null, 2));
+        
+        // Preserve the is_used and used_at values that were set by markLessonAsUsed
+        const updatedLesson = {
+          ...lessonData,
+          is_used: true,
+          used_at: new Date().toISOString()
+        };
+        
+        await lessonRepository.saveLesson(updatedLesson);
+        logger.info(`Successfully saved lesson with ID ${lessonData.id} to database`);
       }
       
       // Track blocked users to handle them appropriately
