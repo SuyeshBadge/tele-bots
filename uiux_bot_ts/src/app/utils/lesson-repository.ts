@@ -26,11 +26,8 @@ interface LessonDBModel {
   explanation?: string;
   option_explanations?: string[];
   image_url?: string;
-  example_link?: {
-    url: string;
-    description: string;
-  };
-  video_query?: string[];
+  example_link: string;
+  video_query: string;
   pool_type?: PoolType;
   is_used?: boolean;
   used_at?: string;
@@ -82,6 +79,28 @@ export class LessonRepository {
    * Map from DB model to app model
    */
   private fromDbModel(dbModel: LessonDBModel): LessonData {
+    // Parse example_link from string to object if it exists
+    let example_link;
+    try {
+      if (dbModel.example_link && dbModel.example_link !== '') {
+        example_link = JSON.parse(dbModel.example_link);
+      }
+    } catch (error) {
+      logger.warn(`Failed to parse example_link for lesson ${dbModel.id}: ${error instanceof Error ? error.message : String(error)}`);
+      example_link = undefined;
+    }
+
+    // Parse video_query from string to array if it exists
+    let videoQuery;
+    try {
+      if (dbModel.video_query && dbModel.video_query !== '') {
+        videoQuery = JSON.parse(dbModel.video_query);
+      }
+    } catch (error) {
+      logger.warn(`Failed to parse video_query for lesson ${dbModel.id}: ${error instanceof Error ? error.message : String(error)}`);
+      videoQuery = undefined;
+    }
+    
     return {
       id: dbModel.id,
       title: dbModel.title,
@@ -96,8 +115,8 @@ export class LessonRepository {
       explanation: dbModel.explanation,
       optionExplanations: dbModel.option_explanations,
       imageUrl: dbModel.image_url,
-      example_link: dbModel.example_link,
-      videoQuery: dbModel.video_query,
+      example_link: example_link,
+      videoQuery: videoQuery,
       pool_type: dbModel.pool_type,
       is_used: dbModel.is_used,
       used_at: dbModel.used_at,
@@ -115,6 +134,26 @@ export class LessonRepository {
       // Log the input data
       logger.debug(`Converting lesson to DB model: ${JSON.stringify(appModel, null, 2)}`);
       
+      // Serialize example_link to JSON string if it exists
+      let example_link_str = '';
+      if (appModel.example_link) {
+        try {
+          example_link_str = JSON.stringify(appModel.example_link);
+        } catch (error) {
+          logger.warn(`Failed to stringify example_link for lesson ${appModel.id}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      // Serialize videoQuery to JSON string if it exists
+      let video_query_str = '';
+      if (appModel.videoQuery && Array.isArray(appModel.videoQuery)) {
+        try {
+          video_query_str = JSON.stringify(appModel.videoQuery);
+        } catch (error) {
+          logger.warn(`Failed to stringify videoQuery for lesson ${appModel.id}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      
       const dbModel: LessonDBModel = {
         id: appModel.id,
         theme: appModel.theme,
@@ -129,8 +168,8 @@ export class LessonRepository {
         explanation: appModel.explanation,
         option_explanations: appModel.optionExplanations,
         image_url: appModel.imageUrl,
-        example_link: appModel.example_link,
-        video_query: appModel.videoQuery,
+        example_link: example_link_str,
+        video_query: video_query_str,
         pool_type: appModel.pool_type,
         is_used: appModel.is_used,
         used_at: appModel.used_at,

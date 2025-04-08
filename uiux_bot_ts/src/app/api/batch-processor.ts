@@ -68,6 +68,43 @@ function validateAndFixLessonData(data: any): any {
     option_explanations: Array.isArray(data.option_explanations) ? data.option_explanations : [],
     video_query: Array.isArray(data.video_query) ? data.video_query : ['UI UX design basics']
   };
+
+  // Ensure example_link is properly structured
+  if (!fixedData.example_link || typeof fixedData.example_link !== 'object' || 
+      !fixedData.example_link.url || !fixedData.example_link.description) {
+    
+    logger.info(`Fixing missing or malformed example_link for lesson on theme: ${fixedData.theme}`);
+    
+    // Fix the example_link with a default value related to the theme if possible
+    fixedData.example_link = {
+      url: `https://uxplanet.org/search?q=${encodeURIComponent(fixedData.theme)}`,
+      description: `Learn more about ${fixedData.theme} principles and techniques`
+    };
+  } else if (!fixedData.example_link.url.startsWith('http')) {
+    // Ensure URL has a protocol
+    fixedData.example_link.url = 'https://' + fixedData.example_link.url;
+  }
+
+  // Ensure video_query is properly populated
+  if (!Array.isArray(fixedData.video_query) || fixedData.video_query.length === 0) {
+    logger.info(`Fixing missing video_query for lesson on theme: ${fixedData.theme}`);
+    
+    // Create a relevant video query based on the theme
+    fixedData.video_query = [
+      `${fixedData.theme} design tutorial`,
+      `UI UX ${fixedData.theme} guide`
+    ];
+  }
+
+  // Ensure each query in video_query is a valid string
+  fixedData.video_query = fixedData.video_query
+    .filter((query: any) => typeof query === 'string' && query.trim() !== '')
+    .map((query: string) => query.trim());
+  
+  // If video_query is still empty after filtering, add a default query
+  if (fixedData.video_query.length === 0) {
+    fixedData.video_query = [`${fixedData.theme} UX design`];
+  }
   
   return fixedData;
 }
@@ -492,7 +529,7 @@ export async function processBatchResults(batchId: string, resultsUrl: string, p
             batch_id: batchId
           };
           
-          // Save to database
+          // Save to database using repository to properly handle serialization
           await lessonRepository.saveLesson(lesson);
           
           successCount++;
@@ -1004,6 +1041,7 @@ export async function markLessonAsUsed(lessonId: string): Promise<void> {
       logger.warn(`Lesson ${lessonId} not found for marking as used`);
       return;
     }
+    console.log('lesson', lesson,lessonId);
     
     // Update the lesson as used
     const { error: updateError } = await supabase
@@ -1084,27 +1122,9 @@ export async function getAvailableLessonFromPool(poolType: PoolType): Promise<Le
       return null;
     }
     
-    // Convert to app model
-    return {
-      id: data[0].id,
-      title: data[0].title,
-      theme: data[0].theme,
-      content: data[0].content,
-      vocabulary: data[0].vocabulary,
-      hasVocabulary: data[0].has_vocabulary,
-      createdAt: data[0].created_at,
-      quizQuestion: data[0].quiz_question,
-      quizOptions: data[0].quiz_options,
-      quizCorrectIndex: data[0].quiz_correct_index,
-      explanation: data[0].explanation,
-      optionExplanations: data[0].option_explanations,
-      imageUrl: data[0].image_url,
-      example_link: data[0].example_link,
-      videoQuery: data[0].video_query,
-      pool_type: data[0].pool_type,
-      is_used: data[0].is_used,
-      batch_id: data[0].batch_id
-    };
+    // Use lesson repository to convert from DB model to app model
+    // This ensures proper handling of serialized fields like example_link and video_query
+    return await lessonRepository.getLessonById(data[0].id);
   } catch (error) {
     logger.error(`Error getting available lesson from pool: ${error instanceof Error ? error.message : String(error)}`);
     return null;
