@@ -1,7 +1,7 @@
 import { BotContext } from './types';
 import { getChildLogger } from '../../utils/logger';
 import { logActivity } from '../../utils/logger';
-import { getSubscriber, createSubscriber, updateSubscriber, deleteSubscriber } from '../../utils/persistence';
+import { getSubscriber, createSubscriber, updateSubscriber, deleteSubscriber, hasExceededDailyLessonLimit, recordLessonRequest } from '../../utils/persistence';
 import { settings } from '../../config/settings';
 import { sendLesson } from '../../utils/lesson-utils';
 
@@ -209,10 +209,24 @@ export async function lessonCommand(ctx: BotContext): Promise<void> {
       return;
     }
     
+    // Check if user has exceeded daily limit
+    const hasExceededLimit = await hasExceededDailyLessonLimit(userId);
+    if (hasExceededLimit) {
+      await ctx.reply(
+        "⚠️ You've reached your daily limit of 3 on-demand lessons.\n\n" +
+        "Please try again tomorrow or wait for scheduled lessons.",
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+    
     // Update activity
     await updateSubscriber(userId, {
       lastActivity: new Date().toISOString()
     });
+
+    // Record the lesson request
+    await recordLessonRequest(userId);
 
     //Send waiting message
     await ctx.reply("🔍 Generating lesson...", { parse_mode: 'Markdown' });

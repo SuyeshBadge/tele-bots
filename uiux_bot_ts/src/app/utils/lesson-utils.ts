@@ -30,16 +30,11 @@ export async function sendLesson(ctx: BotContext, userId: number): Promise<void>
       return;
     }
     
-    // First try to get a lesson from the on-demand pool
+    // Try to get a lesson from the on-demand pool that hasn't been sent to this user
     logger.info('Trying to get lesson from on-demand pool');
-    let lesson = await batchProcessor.getAvailableLessonFromPool('on-demand');
+    let lesson = await batchProcessor.getAvailableLessonFromPool('on-demand', userId);
     
-    if (lesson) {
-      logger.info(`Using lesson from on-demand pool: ${lesson.id}`);
-      
-      // Mark the lesson as used
-      await batchProcessor.markLessonAsUsed(lesson.id);
-    } else {
+    if (!lesson) {
       // If no lesson found in the pool, generate a new one
       logger.warn('No lesson available in on-demand pool, generating one dynamically');
       lesson = await generateNewLesson();
@@ -58,16 +53,18 @@ export async function sendLesson(ctx: BotContext, userId: number): Promise<void>
       const { getImageForLesson } = await import('../api/image-manager');
       const imageDetails = await getImageForLesson(lesson.theme);
       if (imageDetails && imageDetails.url) {
-        // Prioritize remote URLs for Telegram
         imageUrl = imageDetails.url;
       }
     } catch (error) {
       logger.error(`Error getting image for lesson: ${error instanceof Error ? error.message : String(error)}`);
     }
 
-    // Send the lesson content using unified function
+    // Send the lesson content
     try {
       await sendLessonToRecipient(ctx, lesson, imageUrl || undefined);
+      
+      // Record that this lesson was delivered to this user
+      await lessonRepository.trackLessonDelivery(userId, lesson.id, 'on-demand');
       
       // Increment lesson count
       await incrementLessonCount(userId);

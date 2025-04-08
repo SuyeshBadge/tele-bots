@@ -1063,38 +1063,81 @@ export async function markLessonAsUsed(lessonId: string): Promise<void> {
 /**
  * Get an available lesson from the specified pool
  * @param poolType - Type of pool to get lesson from
+ * @param userId - Optional user ID to check lesson history
  * @returns Available lesson or null if none available
  */
-export async function getAvailableLessonFromPool(poolType: PoolType): Promise<LessonData | null> {
+export async function getAvailableLessonFromPool(poolType: PoolType, userId?: number): Promise<LessonData | null> {
   try {
     const supabase = getSupabaseClient();
     
-    // Get an unused lesson from the specified pool
-    const { data, error } = await supabase
-      .from('lessons')
-      .select('*')
-      .eq('pool_type', poolType)
-      .eq('is_used', false)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    
-    if (error) {
-      logger.error(`Error getting available lesson from pool: ${error.message}`);
-      return null;
-    }
-    
-    if (!data || data.length === 0) {
-      logger.info(`No available lessons in ${poolType} pool`);
+    // If userId is provided, first get the lesson IDs that have been sent to this user
+    if (userId) {
+      // Step 1: Get lesson IDs that have been sent to this user
+      const { data: sentLessons, error: sentError } = await supabase
+        .from('lesson_delivery')
+        .select('lesson_id')
+        .eq('user_id', userId);
       
-      // Try to refill the pool
-      await refillPool(poolType);
+      if (sentError) {
+        logger.error(`Error getting sent lessons for user ${userId}: ${sentError.message}`);
+        return null;
+      }
       
-      return null;
+      // Extract lesson IDs into an array
+      const sentLessonIds = sentLessons?.map(lesson => lesson.lesson_id) || [];
+      
+      // Step 2: Get an available lesson that hasn't been sent to this user
+      const { data, error } = await supabase
+        .from('lessons')
+        .select('*')
+        .eq('pool_type', poolType)
+        .order('created_at', { ascending: false });
+      
+      if (error) {
+        logger.error(`Error getting available lesson from pool: ${error.message}`);
+        return null;
+      }
+      
+      // Filter out lessons that have been sent to this user
+      const availableLessons = data?.filter(lesson => !sentLessonIds.includes(lesson.id)) || [];
+      
+      if (availableLessons.length === 0) {
+        logger.info(`No available lessons in ${poolType} pool for user ${userId}`);
+        
+        // Try to refill the pool
+        await refillPool(poolType);
+        
+        return null;
+      }
+      
+      // Use lesson repository to convert from DB model to app model
+      return await lessonRepository.getLessonById(availableLessons[0].id);
+    } else {
+      // If no userId provided, just get any lesson from the pool
+      const { data, error } = await supabase
+        .from('lessons')
+        .select('*')
+        .eq('pool_type', poolType)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      
+      if (error) {
+        logger.error(`Error getting available lesson from pool: ${error.message}`);
+        return null;
+      }
+      
+      if (!data || data.length === 0) {
+        logger.info(`No available lessons in ${poolType} pool`);
+        
+        // Try to refill the pool
+        await refillPool(poolType);
+        
+        return null;
+      }
+      
+      // Use lesson repository to convert from DB model to app model
+      return await lessonRepository.getLessonById(data[0].id);
     }
-    
-    // Use lesson repository to convert from DB model to app model
-    // This ensures proper handling of serialized fields like example_link and video_query
-    return await lessonRepository.getLessonById(data[0].id);
   } catch (error) {
     logger.error(`Error getting available lesson from pool: ${error instanceof Error ? error.message : String(error)}`);
     return null;

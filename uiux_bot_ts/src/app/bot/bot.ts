@@ -175,62 +175,38 @@ export class UIUXLessonBot {
    */
   private async sendScheduledLesson(): Promise<void> {
     logger.info('Sending scheduled lesson to all subscribers');
-    
+
     try {
       // Get all active subscribers
       const subscribers = await getAllSubscribers();
-      
       if (!subscribers || subscribers.length === 0) {
-        logger.info('No subscribers found for scheduled lesson delivery');
+        logger.info('No active subscribers found');
         return;
       }
-      
-      logger.info(`Found ${subscribers.length} subscribers for scheduled lesson delivery`);
-      
+
+      logger.info(`Found ${subscribers.length} active subscribers`);
+
       // Get a lesson from the scheduled pool
       const lessonData = await getScheduledLesson();
-      
       if (!lessonData) {
-        logger.error('Failed to get a scheduled lesson, skipping delivery');
+        logger.error('Failed to get scheduled lesson');
         return;
       }
-      
-      logger.info(`Using lesson "${lessonData.title}" for scheduled delivery`);
-      
-      // Generate or get image based on the theme
+
+      // Get an image for the lesson
       let imageUrl: string | undefined = undefined;
       try {
-        if (lessonData.theme) {
-          const imageDetails = await getImageForLesson(lessonData.theme);
-          if (imageDetails && imageDetails.url) {
-            imageUrl = imageDetails.url;
-            logger.info(`Generated/retrieved image for lesson: ${imageUrl}`);
-          }
+        const imageDetails = await getImageForLesson(lessonData.theme);
+        if (imageDetails && imageDetails.url) {
+          imageUrl = imageDetails.url;
         }
-      } catch (imageError) {
-        logger.error(`Error generating image: ${imageError instanceof Error ? imageError.message : String(imageError)}`);
-        // Continue without an image
+      } catch (error) {
+        logger.error(`Error getting image for lesson: ${error instanceof Error ? error.message : String(error)}`);
       }
-      
-      // Save the lesson with the image URL
-      if (lessonData.imageUrl) {
-        logger.info(`Saving lesson with ID ${lessonData.id} to database`);
-        logger.info('Lesson data:', JSON.stringify(lessonData, null, 2));
-        
-        // Preserve the is_used and used_at values that were set by markLessonAsUsed
-        const updatedLesson = {
-          ...lessonData,
-          is_used: true,
-          used_at: new Date().toISOString()
-        };
-        
-        await lessonRepository.saveLesson(updatedLesson);
-        logger.info(`Successfully saved lesson with ID ${lessonData.id} to database`);
-      }
-      
+
       // Track blocked users to handle them appropriately
       const blockedUsers: number[] = [];
-      
+
       // Send to all subscribers
       for (const subscriber of subscribers) {
         try {
@@ -240,13 +216,13 @@ export class UIUXLessonBot {
             lessonData,
             imageUrl
           );
-          
+
           // Track the lesson delivery with 'scheduled' as the source
           await lessonRepository.trackLessonDelivery(subscriber.id, lessonData.id, 'scheduled');
-          
+
           // Update subscriber stats
           await incrementLessonCount(subscriber.id);
-          
+
           // Send a quiz after the lesson
           try {
             // Use quiz data from the lesson if available
@@ -258,7 +234,7 @@ export class UIUXLessonBot {
                 explanation: lessonData.explanation || `The correct answer is "${lessonData.quizOptions[lessonData.quizCorrectIndex]}"`,
                 option_explanations: lessonData.optionExplanations || []
               };
-              
+
               // Send quiz to the subscriber
               await sendFormattedQuizWithBot(this.bot, subscriber.id, quizData, lessonData.theme);
               logger.info(`Successfully sent quiz to subscriber ${subscriber.id}`);
@@ -270,46 +246,26 @@ export class UIUXLessonBot {
             logger.error(`Error sending quiz to subscriber ${subscriber.id}: ${quizError instanceof Error ? quizError.message : String(quizError)}`);
             // Continue with other subscribers even if quiz sending fails
           }
-          
+
           logger.info(`Successfully sent lesson to subscriber ${subscriber.id}`);
         } catch (error) {
-          // Check if the error is because the user blocked the bot
-          const isBlockedError = 
-            error instanceof Error && 
-            error.message.includes('403: Forbidden: bot was blocked by the user');
-          
-          if (isBlockedError) {
-            logger.warn(`User ${subscriber.id} has blocked the bot, marking for follow-up`);
+          if (error instanceof Error && error.message.includes('bot was blocked')) {
             blockedUsers.push(subscriber.id);
-            
-            // We might want to mark these users as inactive or handle them differently
-            try {
-              // Here we could update their status in the database
-              // await markSubscriberInactive(subscriber.id);
-              logger.info(`User ${subscriber.id} might need to be marked as inactive due to blocking the bot`);
-            } catch (statusError) {
-              logger.error(`Failed to update status for blocked user ${subscriber.id}: ${statusError instanceof Error ? statusError.message : String(statusError)}`);
-            }
+            logger.warn(`User ${subscriber.id} has blocked the bot`);
           } else {
             logger.error(`Error sending lesson to subscriber ${subscriber.id}: ${error instanceof Error ? error.message : String(error)}`);
           }
-          // Continue with other subscribers
         }
       }
-      
-      // Log summary of blocked users
+
+      // Log blocked users
       if (blockedUsers.length > 0) {
-        logger.warn(`${blockedUsers.length} users have blocked the bot: ${blockedUsers.join(', ')}`);
+        logger.info(`Found ${blockedUsers.length} blocked users: ${blockedUsers.join(', ')}`);
       }
-      
-      // Update system health status
-      await simpleUpdateHealthStatus('lesson_delivery', true);
-      
-      logger.info('Scheduled lesson delivery completed successfully');
+
+      logger.info('Completed sending scheduled lesson to all subscribers');
     } catch (error) {
-      logger.error(`Error in scheduled lesson delivery: ${error instanceof Error ? error.message : String(error)}`);
-      // Update health status with error
-      await simpleUpdateHealthStatus('lesson_delivery', false, error instanceof Error ? error.message : String(error));
+      logger.error(`Error in sendScheduledLesson: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

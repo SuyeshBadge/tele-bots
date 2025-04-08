@@ -653,4 +653,65 @@ export async function simpleUpdateHealthStatus(
   } catch (error) {
     logSupabaseError(`simpleUpdateHealthStatus for ${component}`, error);
   }
+}
+
+/**
+ * Check if a user has exceeded their daily lesson limit
+ * @param userId The user ID
+ * @returns True if user has exceeded limit, false otherwise
+ */
+export async function hasExceededDailyLessonLimit(userId: number): Promise<boolean> {
+  try {
+    const supabase = getSupabaseClient();
+    
+    // Get count of lessons requested today
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const { data, error } = await supabase
+      .from('lesson_requests')
+      .select('count')
+      .eq('user_id', userId)
+      .gte('requested_at', today.toISOString())
+      .lt('requested_at', new Date(today.getTime() + 24 * 60 * 60 * 1000).toISOString());
+    
+    if (error) {
+      logSupabaseError(`hasExceededDailyLessonLimit for user ${userId}`, error);
+      return false; // Allow request on error to avoid blocking legitimate users
+    }
+    
+    // Return true if count is 3 or more
+    return data && data.length > 0 && data[0].count >= 3;
+  } catch (error) {
+    logSupabaseError(`hasExceededDailyLessonLimit for user ${userId}`, error);
+    return false; // Allow request on error to avoid blocking legitimate users
+  }
+}
+
+/**
+ * Record a lesson request
+ * @param userId The user ID
+ * @returns True if successful
+ */
+export async function recordLessonRequest(userId: number): Promise<boolean> {
+  try {
+    const supabase = getSupabaseClient();
+    
+    const { error } = await supabase
+      .from('lesson_requests')
+      .insert({
+        user_id: userId,
+        requested_at: new Date().toISOString()
+      });
+    
+    if (error) {
+      logSupabaseError(`recordLessonRequest for user ${userId}`, error);
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    logSupabaseError(`recordLessonRequest for user ${userId}`, error);
+    return false;
+  }
 } 
