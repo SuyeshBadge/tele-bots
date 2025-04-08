@@ -40,7 +40,7 @@ const _cacheTtl = 3600 * 24; // Cache for 24 hours
 
 // Cache for quiz data based on lesson content
 interface QuizCache {
-  [theme: string]: {
+  [key: string]: {
     timestamp: number;
     content: QuizData;
   };
@@ -121,7 +121,7 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       - Avoid repetition of emojis or sentence structure.
       
       4️⃣ Real-World Example:
-      - Provide a valid URL (excluding apple.com) demonstrating the lesson’s concept effectively.
+      - Provide a valid URL (excluding apple.com) demonstrating the lesson's concept effectively.
       - Clearly and concisely explain its relevance to the topic (max 20 words).
       
       5️⃣ Vocabulary Terms (3-5 total):
@@ -185,7 +185,7 @@ async function generateLessonContent(themesToAvoid: string[] = [], quizzesToAvoi
       "\n\n📚 *Content Requirements:* " +
       "\n- Define key vocabulary terms clearly and concisely. " +
       "\n- Provide practical, relatable examples that show how these terms apply to real-world design scenarios. " +
-      "\n- Keep explanations intermediate-friendly, avoiding jargon unless it’s defined. " +
+      "\n- Keep explanations intermediate-friendly, avoiding jargon unless it's defined. " +
       "\n\n🌐 *Examples:* " +
       "\n- Always include a link to a real, accessible webpage that demonstrates the concept in action. " +
       "\n- Use well-known, reputable sites to highlight best practices. " +
@@ -357,8 +357,11 @@ export async function generateLesson(themesToAvoid: string[] = [], quizzesToAvoi
     // Log only the theme and title, not the entire lesson data
     logger.info(`Generated lesson: ${lessonData.title} (${lessonData.theme})`);
     
+    // Generate a unique cache key using both theme and a timestamp
+    const cacheKey = `${lessonData.theme.toLowerCase().trim()}-${Date.now()}`;
+    
     // Also cache this as a quiz since it contains quiz data
-    _quizCache[lessonData.theme.toLowerCase().trim()] = {
+    _quizCache[cacheKey] = {
       timestamp: Date.now(),
       content: {
         question: lessonData.quiz_question,
@@ -400,16 +403,7 @@ export async function generateQuiz(theme?: string): Promise<QuizData> {
   const themeLower = quizTheme.toLowerCase().trim();
   
   try {
-    // Check if we have a cached quiz from a recently generated lesson
-    if (themeLower in _quizCache) {
-      const { timestamp, content } = _quizCache[themeLower];
-      if (Date.now() - timestamp < _cacheTtl * 1000) {
-        logger.info(`Using cached quiz for theme: ${quizTheme}`);
-        return content;
-      }
-    }
-    
-    // If no cached quiz, generate lesson content which includes quiz data
+    // Generate a new quiz instead of using cache
     const lessonData = await generateLessonContent();
     
     return {

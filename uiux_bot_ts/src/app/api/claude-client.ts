@@ -42,7 +42,7 @@ const _cacheTtl = 3600 * 24; // Cache for 24 hours
 
 // Cache for quiz data based on lesson content
 interface QuizCache {
-  [theme: string]: {
+  [key: string]: {
     timestamp: number;
     content: QuizData;
   };
@@ -554,8 +554,11 @@ export async function generateLesson(themesToAvoid: string[] = [], quizzesToAvoi
     // Log only the theme and title, not the entire lesson data
     logger.info(`Generated lesson: ${lessonData.title} (${lessonData.theme})`);
     
+    // Generate a unique cache key using both theme and a timestamp
+    const cacheKey = `${lessonData.theme.toLowerCase().trim()}-${Date.now()}`;
+    
     // Also cache this as a quiz since it contains quiz data
-    _quizCache[lessonData.theme.toLowerCase().trim()] = {
+    _quizCache[cacheKey] = {
       timestamp: Date.now(),
       content: {
         question: lessonData.quiz_question,
@@ -582,62 +585,7 @@ export async function generateLesson(themesToAvoid: string[] = [], quizzesToAvoi
     };
   } catch (error) {
     logger.error(`Error generating lesson: ${error instanceof Error ? error.message : String(error)}`);
-    
-    // Create a fallback lesson when generation fails
-    logger.info('Using fallback lesson due to generation failure');
-    const fallbackTheme = getRandomTheme();
-    
-    // Create a simple fallback lesson
-    const fallbackLesson: LessonSections = {
-      title: "Understanding UI/UX Design Principles",
-      theme: fallbackTheme,
-      contentPoints: [
-        "🎨 Good UI/UX design focuses on user needs and expectations",
-        "🔄 Iterative testing helps identify and fix usability issues",
-        "📱 Responsive design ensures consistent experience across devices",
-        "🔍 User research provides valuable insights for design decisions",
-        "🎯 Clear visual hierarchy guides users through content effectively"
-      ],
-      quizQuestion: "What is the primary goal of user-centered design?",
-      quizOptions: [
-        "To create visually appealing interfaces",
-        "To solve user problems effectively",
-        "To implement the latest design trends",
-        "To minimize development time and costs"
-      ],
-      correctOptionIndex: 1,
-      explanation: "User-centered design prioritizes solving user problems effectively by understanding their needs, behaviors, and goals.",
-      optionExplanations: [
-        "While visual appeal is important, it's not the primary goal of user-centered design.",
-        "Correct! User-centered design focuses on solving user problems effectively.",
-        "Following trends without considering user needs doesn't align with user-centered design principles.",
-        "While efficiency is valuable, user-centered design prioritizes user needs over development timelines."
-      ],
-      vocabulary: [
-        {
-          term: "User-Centered Design",
-          definition: "A design approach that prioritizes user needs and preferences throughout the design process.",
-          example: "Conducting user interviews to inform design decisions."
-        },
-        {
-          term: "Usability Testing",
-          definition: "Evaluating a product by testing it with representative users.",
-          example: "Observing users complete tasks on a website prototype."
-        },
-        {
-          term: "Visual Hierarchy",
-          definition: "The arrangement of elements to show their order of importance.",
-          example: "Using size and color to emphasize primary navigation elements."
-        }
-      ],
-      videoQuery: ["user centered design principles"],
-      example_link: {
-        url: "https://www.nngroup.com/",
-        description: "Nielsen Norman Group provides research-based insights on user experience design."
-      }
-    };
-    
-    return fallbackLesson;
+    throw new Error(`Failed to generate lesson: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -652,152 +600,17 @@ export async function generateQuiz(theme?: string): Promise<QuizData> {
   const themeLower = quizTheme.toLowerCase().trim();
   
   try {
-    // Check if we have a cached quiz from a recently generated lesson
-    if (themeLower in _quizCache) {
-      const { timestamp, content } = _quizCache[themeLower];
-      if (Date.now() - timestamp < _cacheTtl * 1000) {
-        logger.info(`Using cached quiz for theme: ${quizTheme}`);
-        return content;
-      }
-    }
+    // Generate a new quiz instead of using cache
+    const lessonData = await generateLessonContent();
     
-    // Try to get a quiz from a pool lesson
-    try {
-      // Import batchProcessor dynamically to avoid circular dependencies
-      const batchProcessor = await import('../api/batch-processor').then(m => m.default);
-      
-      // Try to find a lesson in the pools that we can extract a quiz from
-      logger.info(`Looking for a pool lesson with quiz for theme: ${quizTheme}`);
-      
-      // First try scheduled pool
-      let poolLesson = await batchProcessor.getAvailableLessonFromPool('scheduled');
-      
-      // If not found in scheduled, try on-demand pool
-      if (!poolLesson) {
-        poolLesson = await batchProcessor.getAvailableLessonFromPool('on-demand');
-      }
-      
-      // If we found a lesson in a pool, extract its quiz data
-      if (poolLesson && poolLesson.quizQuestion && poolLesson.quizOptions) {
-        logger.info(`Found pool lesson with quiz data: ${poolLesson.id}`);
-        
-        // Note: We don't mark the lesson as used since we're just extracting its quiz
-        // This allows the lesson to still be used for delivering content
-        
-        // Create quiz from pool lesson
-        const correctIndex = typeof poolLesson.quizCorrectIndex === 'number' ? poolLesson.quizCorrectIndex : 0;
-        const quizData: QuizData = {
-          question: poolLesson.quizQuestion,
-          options: poolLesson.quizOptions,
-          correctIndex: correctIndex,
-          explanation: poolLesson.explanation,
-          option_explanations: poolLesson.optionExplanations || 
-            generateDefaultExplanations(
-              poolLesson.quizOptions, 
-              correctIndex, 
-              quizTheme
-            )
-        };
-        
-        // Cache the quiz
-        _quizCache[themeLower] = {
-          timestamp: Date.now(),
-          content: quizData
-        };
-        
-        return quizData;
-      }
-    } catch (poolError) {
-      logger.warn(`Error trying to get quiz from pool: ${poolError instanceof Error ? poolError.message : String(poolError)}`);
-      // Continue to next option if pool access fails
-    }
-    
-    // If not found in pools, try to get a quiz from recently delivered lessons
-    try {
-      logger.info(`Looking for a quiz from past lessons for theme: ${quizTheme}`);
-      
-      // Get recent quiz lessons directly from the database without calling getRecentLessons
-      const supabase = await import('../../database/supabase-client').then(m => m.getSupabaseClient);
-      const { data, error } = await supabase()
-        .from('lessons')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(10);
-      
-      if (error) {
-        throw new Error(`Error getting recent lessons: ${error.message}`);
-      }
-      
-      if (data && data.length > 0) {
-        // Find a lesson with quiz data that we can use
-        const lessonWithQuiz = data.find(lesson => 
-          lesson.quiz_question && 
-          lesson.quiz_options && 
-          lesson.quiz_options.length > 0 &&
-          typeof lesson.quiz_correct_index === 'number'
-        );
-        
-        if (lessonWithQuiz) {
-          logger.info(`Using quiz from past lesson: ${lessonWithQuiz.id}`);
-          
-          // Create quiz from past lesson
-          const correctIndex = typeof lessonWithQuiz.quiz_correct_index === 'number' ? lessonWithQuiz.quiz_correct_index : 0;
-          const quizData: QuizData = {
-            question: lessonWithQuiz.quiz_question,
-            options: lessonWithQuiz.quiz_options,
-            correctIndex: correctIndex,
-            explanation: lessonWithQuiz.explanation,
-            option_explanations: lessonWithQuiz.option_explanations || 
-              generateDefaultExplanations(
-                lessonWithQuiz.quiz_options, 
-                correctIndex, 
-                quizTheme
-              )
-          };
-          
-          // Cache the quiz
-          _quizCache[themeLower] = {
-            timestamp: Date.now(),
-            content: quizData
-          };
-          
-          return quizData;
-        }
-      }
-    } catch (dbError) {
-      logger.warn(`Error trying to get quiz from past lessons: ${dbError instanceof Error ? dbError.message : String(dbError)}`);
-      // Continue to fallback if database access fails
-    }
-    
-    // As a last resort, use the fallback quiz instead of calling Claude API
-    logger.info(`No suitable quiz found, using fallback quiz for theme: ${quizTheme}`);
-    
-    // Fallback quiz
-    const fallbackOptions = [
-      "Making designs as complex as possible",
-      "Using user feedback to improve designs",
-      "Ignoring accessibility concerns",
-      "Following the latest design trends"
-    ];
-    const fallbackCorrectIndex = 1;
-    const fallbackExplanation = `Using user feedback is essential when implementing any UI/UX design principle related to ${quizTheme}.`;
-    
-    const fallbackQuiz = {
-      question: `What is a key principle of good UI/UX design related to ${quizTheme}?`,
-      options: fallbackOptions,
-      correctIndex: fallbackCorrectIndex,
-      explanation: fallbackExplanation,
-      option_explanations: generateDefaultExplanations(fallbackOptions, fallbackCorrectIndex, quizTheme)
+    return {
+      question: lessonData.quiz_question,
+      options: lessonData.quiz_options,
+      correctIndex: lessonData.correct_option_index,
+      explanation: lessonData.explanation,
+      option_explanations: lessonData.option_explanations || 
+        generateDefaultExplanations(lessonData.quiz_options, lessonData.correct_option_index, quizTheme)
     };
-    
-    // Cache the fallback quiz to avoid future lookups
-    _quizCache[themeLower] = {
-      timestamp: Date.now(),
-      content: fallbackQuiz
-    };
-    
-    return fallbackQuiz;
-    
   } catch (error) {
     logger.error(`Error generating quiz: ${error instanceof Error ? error.message : String(error)}`);
     
