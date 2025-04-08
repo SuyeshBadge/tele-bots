@@ -47,6 +47,9 @@ export async function initSupabaseSchema(): Promise<void> {
     // Check and create lesson_delivery table
     await ensureLessonDeliveryTable(supabase);
     
+    // Check and create quiz_deliveries table
+    await ensureQuizDeliveriesTable(supabase);
+    
     logger.info('Supabase schema initialization completed');
   } catch (error) {
     logger.error(`Failed to initialize Supabase schema: ${error instanceof Error ? error.message : String(error)}`);
@@ -233,5 +236,37 @@ async function ensureLessonDeliveryTable(supabase: SupabaseClient): Promise<void
     }
   } catch (error) {
     logger.warn(`Error ensuring lesson_delivery table: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Ensure quiz_deliveries table exists with correct schema
+ */
+async function ensureQuizDeliveriesTable(supabase: SupabaseClient): Promise<void> {
+  try {
+    // Check if table exists by trying to select from it
+    const { error: checkError } = await supabase
+      .from('quiz_deliveries')
+      .select('id')
+      .limit(1);
+    
+    if (checkError && checkError.code === '42P01') { // Table doesn't exist code
+      // Create the table using SQL
+      const { error: createError } = await supabase.rpc('create_quiz_deliveries_table', {});
+      
+      if (createError) {
+        // Table doesn't exist and RPC failed, likely because the function doesn't exist
+        logger.warn(`Failed to create quiz_deliveries table via RPC: ${createError.message}`);
+        logger.info('Note: You need to manually create the quiz_deliveries table in Supabase with the correct schema');
+      } else {
+        logger.info('Created quiz_deliveries table');
+      }
+    } else if (checkError) {
+      logger.warn(`Issue checking quiz_deliveries table: ${checkError.message}`);
+    } else {
+      logger.info('Quiz deliveries table exists');
+    }
+  } catch (error) {
+    logger.warn(`Error ensuring quiz_deliveries table: ${error instanceof Error ? error.message : String(error)}`);
   }
 } 

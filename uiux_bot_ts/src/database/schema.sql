@@ -70,12 +70,27 @@ CREATE TABLE IF NOT EXISTS quizzes (
   expires_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
+-- Add the quiz_deliveries table schema
+CREATE TABLE IF NOT EXISTS quiz_deliveries (
+  id SERIAL PRIMARY KEY,
+  poll_id TEXT NOT NULL REFERENCES quizzes(poll_id) ON DELETE CASCADE,
+  user_id BIGINT NOT NULL REFERENCES subscribers(id) ON DELETE CASCADE,
+  delivered_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+  answered BOOLEAN NOT NULL DEFAULT FALSE,
+  answered_at TIMESTAMP WITH TIME ZONE,
+  answer_correct BOOLEAN,
+  UNIQUE(poll_id, user_id)
+);
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_subscribers_last_activity ON subscribers(last_activity);
 CREATE INDEX IF NOT EXISTS idx_user_history_user_id ON user_history(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_history_created_at ON user_history(created_at);
 CREATE INDEX IF NOT EXISTS idx_lessons_theme ON lessons(theme);
 CREATE INDEX IF NOT EXISTS idx_quizzes_expires_at ON quizzes (expires_at);
+CREATE INDEX IF NOT EXISTS idx_quiz_deliveries_poll_id ON quiz_deliveries (poll_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_deliveries_user_id ON quiz_deliveries (user_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_deliveries_answered ON quiz_deliveries (answered);
 
 -- Create a function to update last_activity automatically
 CREATE OR REPLACE FUNCTION update_last_activity()
