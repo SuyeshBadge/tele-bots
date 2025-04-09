@@ -270,6 +270,7 @@ export class QuizRepository {
     theme: string;
     userId: number;
     createdAt: string;
+    sentAt: string;
   }>> {
     try {
       const supabase = getSupabaseClient();
@@ -299,7 +300,7 @@ export class QuizRepository {
       // Get quiz deliveries to find out which users received these quizzes
       const { data: deliveryData, error: deliveryError } = await supabase
         .from('quiz_deliveries')
-        .select('poll_id, user_id, answered')
+        .select('poll_id, user_id, answered, delivered_at')
         .in('poll_id', quizData.map(q => q.poll_id))
         .eq('answered', false);
       
@@ -316,7 +317,8 @@ export class QuizRepository {
           userId: delivery.user_id,
           question: quizInfo?.question || 'UI/UX Quiz',
           theme: quizInfo?.theme || 'UI/UX Design',
-          createdAt: quizInfo?.created_at || new Date().toISOString()
+          createdAt: quizInfo?.created_at || new Date().toISOString(),
+          sentAt: delivery.delivered_at 
         };
       }) || [];
       

@@ -413,11 +413,12 @@ export async function sendQuizReminder(
     question: string;
     theme: string;
     createdAt: string;
+    sentAt: string;
   }
 ): Promise<boolean> {
   try {
     // Create a friendly time string since quiz was sent
-    const quizTime = new Date(quizInfo.createdAt);
+    const quizTime = new Date(quizInfo.sentAt);
     const now = new Date();
     const minutesAgo = Math.floor((now.getTime() - quizTime.getTime()) / (1000 * 60));
     
