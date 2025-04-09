@@ -1070,8 +1070,36 @@ export async function getAvailableLessonFromPool(poolType: PoolType, userId?: nu
   try {
     const supabase = getSupabaseClient();
     
-    // If userId is provided, first get the lesson IDs that have been sent to this user
-    if (userId) {
+    // For scheduled lessons, we only need to check if the lesson is used
+    // We don't need to check lesson_delivery since scheduled lessons are sent to all users
+    if (poolType === 'scheduled') {
+      const { data, error } = await supabase
+        .from('lessons')
+        .select('*')
+        .eq('pool_type', poolType)
+        .eq('is_used', false)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      
+      if (error) {
+        logger.error(`Error getting available scheduled lesson from pool: ${error.message}`);
+        return null;
+      }
+      
+      if (!data || data.length === 0) {
+        logger.info(`No available lessons in ${poolType} pool`);
+        
+        // Try to refill the pool
+        await refillPool(poolType);
+        
+        return null;
+      }
+      
+      // Use lesson repository to convert from DB model to app model
+      return await lessonRepository.getLessonById(data[0].id);
+    }
+    // For on-demand lessons, keep the existing logic of checking lesson_delivery
+    else if (userId) {
       // Step 1: Get lesson IDs that have been sent to this user
       const { data: sentLessons, error: sentError } = await supabase
         .from('lesson_delivery')
@@ -1118,6 +1146,7 @@ export async function getAvailableLessonFromPool(poolType: PoolType, userId?: nu
         .from('lessons')
         .select('*')
         .eq('pool_type', poolType)
+        .eq('is_used', false)
         .order('created_at', { ascending: false })
         .limit(1);
       
