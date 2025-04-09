@@ -230,13 +230,13 @@ export class UIUXLessonBot {
               const quizData = {
                 question: lessonData.quizQuestion,
                 options: lessonData.quizOptions,
-                correctIndex: lessonData.quizCorrectIndex,
+                correctOption: lessonData.quizCorrectIndex,
                 explanation: lessonData.explanation || `The correct answer is "${lessonData.quizOptions[lessonData.quizCorrectIndex]}"`,
                 option_explanations: lessonData.optionExplanations || []
               };
 
               // Send quiz to the subscriber
-              await sendFormattedQuizWithBot(this.bot, subscriber.id, quizData, lessonData.theme);
+              await sendFormattedQuizWithBot(this.bot, subscriber.id, quizData, lessonData.id);
               logger.info(`Successfully sent quiz to subscriber ${subscriber.id}`);
             } else {
               // If lesson doesn't have quiz data, log it but don't generate a new one

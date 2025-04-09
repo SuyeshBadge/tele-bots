@@ -10,7 +10,7 @@ import batchProcessor from '../api/batch-processor';
 import { lessonRepository } from './lesson-repository';
 import claudeClient from '../api/claude-client';
 import { formatLessonContent, formatVocabulary } from './lesson-utils';
-
+import * as lessonUtils from './lesson-utils';
 // Configure logger
 const logger = getChildLogger('lesson-pool-utils');
 
@@ -52,7 +52,7 @@ export async function getScheduledLesson(): Promise<LessonData | null> {
     
     // If still no lesson, fall back to dynamic generation
     logger.warn('No lesson available in any pool, generating one dynamically');
-    return await generateNewLesson();
+    return await lessonUtils.generateNewLesson();
   } catch (error) {
     logger.error(`Error getting scheduled lesson: ${error instanceof Error ? error.message : String(error)}`);
     return null;
@@ -83,76 +83,13 @@ export async function getOnDemandLesson(): Promise<LessonData | null> {
     // This should be rare if the pool system is working properly
     logger.warn('No lesson available in on-demand pool, generating one dynamically');
     
-    return await generateNewLesson();
+    return await lessonUtils.generateNewLesson();
   } catch (error) {
     logger.error(`Error getting on-demand lesson: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }
 
-/**
- * Generate a new lesson on-demand
- * @returns Generated lesson data or null if generation fails
- */
-async function generateNewLesson(): Promise<LessonData | null> {
-  try {
-    logger.info('Generating new lesson');
-    
-    // Get recent themes and quizzes to avoid
-    const recentThemes = await lessonRepository.getRecentThemes();
-    const recentQuizzes = await lessonRepository.getRecentQuizzes();
-    
-    // Generate lesson using Claude with recent themes to avoid
-    const lessonSections = await claudeClient.generateLesson(recentThemes, recentQuizzes);
-    if (!lessonSections) {
-      throw new Error('Failed to generate lesson sections');
-    }
-    
-    // Format content
-    const formattedContent = formatLessonContent(lessonSections);
-    
-    // Format vocabulary
-    const formattedVocabulary = formatVocabulary(lessonSections.vocabulary);
-    
-    // Create the lesson with the correct schema
-    const lesson: LessonData = {
-      id: `lesson-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-      title: lessonSections.title,
-      theme: lessonSections.theme,
-      content: formattedContent,
-      vocabulary: formattedVocabulary,
-      hasVocabulary: lessonSections.vocabulary.length > 0,
-      createdAt: new Date().toISOString(),
-      quizQuestion: lessonSections.quizQuestion,
-      quizOptions: lessonSections.quizOptions,
-      quizCorrectIndex: lessonSections.correctOptionIndex,
-      explanation: lessonSections.explanation,
-      optionExplanations: lessonSections.optionExplanations,
-      example_link: lessonSections.example_link,
-      videoQuery: lessonSections.videoQuery,
-      pool_type: 'on-demand',
-      is_used: true,
-      used_at: new Date().toISOString()
-    };
-    
-    // Save to database
-    try {
-      const savedLesson = await lessonRepository.saveLesson(lesson);
-      logger.info(`Successfully saved lesson with ID ${lesson.id}`);
-      
-      // Check if the pool needs refilling and schedule it if needed
-      await batchProcessor.checkAndRefillPoolIfNeeded('on-demand');
-      
-      return savedLesson;
-    } catch (error) {
-      logger.error(`Failed to save lesson to database: ${error instanceof Error ? error.message : String(error)}`);
-      throw error;
-    }
-  } catch (error) {
-    logger.error(`Error generating new lesson: ${error instanceof Error ? error.message : String(error)}`);
-    return null;
-  }
-}
 
 /**
  * Initialize lesson pools if needed

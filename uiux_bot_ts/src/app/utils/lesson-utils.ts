@@ -507,5 +507,6 @@ async function getScheduledLesson(): Promise<LessonData | null> {
 // Export utility functions that aren't already exported individually
 export {
   sendLessonToRecipient,
-  getScheduledLesson
+  getScheduledLesson,
+  generateNewLesson
 } 

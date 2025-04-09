@@ -329,6 +329,46 @@ export class QuizRepository {
       return [];
     }
   }
+
+  async getQuizByLessonId(lessonId: string): Promise<QuizData | null> {
+    try {
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from('quizzes')
+        .select('*')
+        .eq('lesson_id', lessonId)
+        .single();
+
+      if (error) {
+        this.logSupabaseError('getQuizByLessonId', error);
+        return null;
+      }
+
+      if (!data) {
+        logger.info(`No quiz found for lesson ID: ${lessonId}`);
+        return null;
+      }
+
+      // Convert DB model to QuizData interface
+      return {
+        pollId: data.poll_id,
+        lessonId: data.lesson_id,
+        quizId: data.quiz_id,
+        correctOption: data.correct_option,
+        question: data.question,
+        options: data.options,
+        theme: data.theme,
+        explanation: data.explanation,
+        option_explanations: data.option_explanations,
+        createdAt: data.created_at,
+        expiresAt: data.expires_at
+      };
+    } catch (error) {
+      this.logSupabaseError('getQuizByLessonId', error);
+      return null;
+    }
+  }
+
 }
 
 // Export a singleton instance

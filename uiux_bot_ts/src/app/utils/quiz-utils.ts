@@ -13,7 +13,7 @@ const logger = getChildLogger('quiz-utils');
 interface QuizData {
   question: string;
   options: string[];
-  correctIndex: number;
+  correctOption: number;
   explanation?: string;
   option_explanations?: string[];
 }
@@ -83,7 +83,7 @@ export function formatQuiz(quiz: QuizData): {
       "Technical implementation",
       "Complex interfaces"
     ],
-    correctIndex: typeof quiz.correctIndex === 'number' ? quiz.correctIndex : 1
+    correctOption: typeof quiz.correctOption === 'number' ? quiz.correctOption : 1
   };
 
   // Add emoji to the question to make it more engaging
@@ -107,7 +107,7 @@ export function formatQuiz(quiz: QuizData): {
       emoji = '📱';
     } else if (/test|research|data|analyze/i.test(option)) {
       emoji = '🔍';
-    } else if (index === safeQuiz.correctIndex) {
+    } else if (index === safeQuiz.correctOption) {
       // Add a subtle but different emoji for the correct answer
       emoji = '💡';
     } else if (index === 0) {
@@ -199,10 +199,10 @@ export function getDetailedQuizExplanation(quizData: QuizData): string {
     const optionsLength = Math.min(quizData.options.length, quizData.option_explanations.length);
     
     // First, let's validate that the correct option index is valid
-    const correctIndex = typeof quizData.correctIndex === 'number' && 
-                         quizData.correctIndex >= 0 && 
-                         quizData.correctIndex < optionsLength 
-                         ? quizData.correctIndex : 0;
+    const correctIndex = typeof quizData.correctOption === 'number' && 
+                         quizData.correctOption >= 0 && 
+                         quizData.correctOption < optionsLength 
+                         ? quizData.correctOption : 0;
     
     // Make sure the correct answer always has an explanation
     if (!quizData.option_explanations[correctIndex] || quizData.option_explanations[correctIndex].trim() === '') {
@@ -284,7 +284,7 @@ export async function sendFormattedQuiz(
   ctx: BotContext, 
   userId: number, 
   quizData: QuizData, 
-  theme: string
+  lessonId: string
 ): Promise<void> {
   try {
     // Format the quiz
@@ -301,7 +301,7 @@ export async function sendFormattedQuiz(
       {
         is_anonymous: false,
         type: 'quiz',
-        correct_option_id: quizData.correctIndex,
+        correct_option_id: quizData.correctOption,
         explanation: formattedExplanation,
         explanation_parse_mode: 'HTML'
       }
@@ -311,14 +311,13 @@ export async function sendFormattedQuiz(
     if (poll.poll) {
       await quizRepository.saveQuiz({
         pollId: poll.poll.id,
-        lessonId: theme,
+        lessonId: lessonId,
         quizId: `quiz-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        correctOption: quizData.correctIndex,
+        correctOption: quizData.correctOption,
         question: quizData.question,
         options: quizData.options,
         explanation: formattedExplanation, // Save the formatted explanation
         option_explanations: quizData.option_explanations || [],
-        theme: theme,
         createdAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
       });
@@ -329,7 +328,7 @@ export async function sendFormattedQuiz(
       // Update quiz count for this user
       await incrementQuizCount(userId);
       
-      logger.info(`Quiz sent to user ${userId} for theme ${theme}`);
+      logger.info(`Quiz sent to user ${userId} for lesson ${lessonId}`);
     }
   } catch (error) {
     logger.error(`Error sending formatted quiz: ${error instanceof Error ? error.message : String(error)}`);
@@ -345,7 +344,7 @@ export async function sendFormattedQuizWithBot(
   bot: Bot<BotContext>,
   userId: number,
   quizData: QuizData,
-  theme: string
+  lessonId: string
 ): Promise<void> {
   try {
     // Format the quiz
@@ -362,7 +361,7 @@ export async function sendFormattedQuizWithBot(
       {
         is_anonymous: false,
         type: 'quiz',
-        correct_option_id: quizData.correctIndex,
+        correct_option_id: quizData.correctOption,
         explanation: formattedExplanation,
         explanation_parse_mode: 'HTML'
       }
@@ -372,14 +371,13 @@ export async function sendFormattedQuizWithBot(
     if (poll.poll) {
       await quizRepository.saveQuiz({
         pollId: poll.poll.id,
-        lessonId: theme,
+        lessonId: lessonId,
         quizId: `quiz-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        correctOption: quizData.correctIndex,
+        correctOption: quizData.correctOption,
         question: quizData.question,
         options: quizData.options,
         explanation: formattedExplanation, // Save the formatted explanation
         option_explanations: quizData.option_explanations || [],
-        theme: theme,
         createdAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() // 24 hours
       });
@@ -390,7 +388,7 @@ export async function sendFormattedQuizWithBot(
       // Update quiz count for this user
       await incrementQuizCount(userId);
       
-      logger.info(`Quiz sent to user ${userId} for theme ${theme}`);
+      logger.info(`Quiz sent to user ${userId} for lesson ${lessonId}`);
     }
   } catch (error) {
     logger.error(`Error sending formatted quiz: ${error instanceof Error ? error.message : String(error)}`);

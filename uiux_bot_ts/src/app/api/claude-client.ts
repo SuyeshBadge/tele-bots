@@ -589,50 +589,7 @@ export async function generateLesson(themesToAvoid: string[] = [], quizzesToAvoi
   }
 }
 
-/**
- * Generate a quiz for a UI/UX theme
- * 
- * @param theme - Optional theme for the quiz
- * @returns Quiz data with question, options, and correct answer
- */
-export async function generateQuiz(theme?: string): Promise<QuizData> {
-  const quizTheme = theme || getRandomTheme();
-  const themeLower = quizTheme.toLowerCase().trim();
-  
-  try {
-    // Generate a new quiz instead of using cache
-    const lessonData = await generateLessonContent();
-    
-    return {
-      question: lessonData.quiz_question,
-      options: lessonData.quiz_options,
-      correctIndex: lessonData.correct_option_index,
-      explanation: lessonData.explanation,
-      option_explanations: lessonData.option_explanations || 
-        generateDefaultExplanations(lessonData.quiz_options, lessonData.correct_option_index, quizTheme)
-    };
-  } catch (error) {
-    logger.error(`Error generating quiz: ${error instanceof Error ? error.message : String(error)}`);
-    
-    // Fallback quiz
-    const fallbackOptions = [
-      "Making designs as complex as possible",
-      "Using user feedback to improve designs",
-      "Ignoring accessibility concerns",
-      "Following the latest design trends"
-    ];
-    const fallbackCorrectIndex = 1;
-    const fallbackExplanation = `Using user feedback is essential when implementing any UI/UX design principle related to ${quizTheme}.`;
-    
-    return {
-      question: `What is a key principle of good UI/UX design related to ${quizTheme}?`,
-      options: fallbackOptions,
-      correctIndex: fallbackCorrectIndex,
-      explanation: fallbackExplanation,
-      option_explanations: generateDefaultExplanations(fallbackOptions, fallbackCorrectIndex, quizTheme)
-    };
-  }
-}
+
 
 /**
  * Generate default explanations for quiz options when none are provided
@@ -663,6 +620,5 @@ export function getRandomTheme(): string {
 
 export default {
   generateLesson,
-  generateQuiz,
   getRandomTheme,
 }; 

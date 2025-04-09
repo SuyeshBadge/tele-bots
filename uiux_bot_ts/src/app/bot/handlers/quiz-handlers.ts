@@ -11,6 +11,7 @@ import { getSupabaseClient } from '../../../database/supabase-client';
 
 // Import QuizData type from the types file 
 import { QuizData } from './types';
+import { quizRepository } from '@app/utils/quiz-repository';
 
 const logger = getChildLogger('quiz-handlers');
 
@@ -208,32 +209,37 @@ export async function onPollAnswer(ctx: BotContext): Promise<void> {
  * @param userId User ID to send quiz to
  * @param theme Theme of the quiz
  */
-export async function sendQuiz(ctx: BotContext, userId: number, theme: string): Promise<void> {
+export async function sendQuiz(ctx: BotContext, userId: number, lessonId: string): Promise<void> {
   try {
     logActivity('quiz_generation_started', userId, 'Starting to generate or retrieve quiz', {
-      theme
+      lessonId
     });
     
     // Generate quiz - this now uses cached data if available
     const startTime = Date.now();
-    const quiz = await claudeClient.generateQuiz(theme);
+
+    const quiz = await quizRepository.getQuizByLessonId(lessonId);
     const elapsedTime = Date.now() - startTime;
     const fromCache = elapsedTime < 100; // Likely from cache if it took less than 100ms
     
     logActivity('quiz_generated', userId, `Quiz ${fromCache ? 'retrieved from cache' : 'generated'}`, {
-      theme,
-      questionLength: quiz.question.length,
-      optionsCount: quiz.options.length,
+      lessonId,
+      questionLength: quiz?.question.length || 0,
+      optionsCount: quiz?.options.length || 0,
       generationTimeMs: elapsedTime,
       fromCache,
-      hasOptionExplanations: !!quiz.option_explanations && quiz.option_explanations.length > 0
+      hasOptionExplanations: !!quiz?.option_explanations && quiz?.option_explanations.length > 0
     });
     
     // Use the new utility function to send consistently formatted quiz
-    await sendFormattedQuiz(ctx, userId, quiz, theme);
+    if (quiz) {
+      await sendFormattedQuiz(ctx, userId, quiz, lessonId);
+    } else {
+      logger.error('Quiz data is null, skipping quiz send');
+    }
     
     logActivity('quiz_sent', userId, 'Quiz successfully sent to user', {
-      theme,
+      lessonId,
       fromCache
     });
     
