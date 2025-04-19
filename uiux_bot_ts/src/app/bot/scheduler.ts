@@ -172,11 +172,11 @@ export class Scheduler {
         quizzesByUser.get(quiz.userId)?.push(quiz);
       }
       
-      // Send at most one reminder per user, for their most recent unanswered quiz
+      // Send at most one reminder per user, for their most recently sent unanswered quiz
       let remindersSent = 0;
       for (const [userId, quizzes] of quizzesByUser.entries()) {
-        // Sort by createdAt descending to get most recent first
-        quizzes.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        // Sort by sentAt descending to get most recently sent quiz first
+        quizzes.sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
         
         const mostRecentQuiz = quizzes[0];
         const success = await sendQuizReminder(this.botInstance, userId, mostRecentQuiz);

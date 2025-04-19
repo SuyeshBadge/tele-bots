@@ -288,7 +288,8 @@ export class QuizRepository {
         .from('quizzes')
         .select('poll_id, question, theme, created_at')
         .gt('created_at', maxTime.toISOString())  // Less than maxHours old
-        .lt('created_at', minTime.toISOString());  // At least minMinutes old
+        .lt('created_at', minTime.toISOString())  // At least minMinutes old
+        .order('created_at', { ascending: false }); // Sort by newest first
       
       if (quizError || !quizData || quizData.length === 0) {
         if (quizError) {
@@ -302,7 +303,8 @@ export class QuizRepository {
         .from('quiz_deliveries')
         .select('poll_id, user_id, answered, delivered_at')
         .in('poll_id', quizData.map(q => q.poll_id))
-        .eq('answered', false);
+        .eq('answered', false)
+        .order('delivered_at', { ascending: false }); // Sort by most recently delivered first
       
       if (deliveryError) {
         this.logSupabaseError('getUnansweredQuizzes - delivery fetch', deliveryError);
